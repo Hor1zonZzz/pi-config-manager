@@ -1,0 +1,63 @@
+{
+  "name": "pi-config-manager",
+  "version": "0.1.0",
+  "description": "Manage Pi tools, skills, context files, and extensions from one searchable TUI overlay.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Hor1zonZzz",
+    "url": "https://github.com/Hor1zonZzz"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hor1zonZzz/pi-config-manager.git"
+  },
+  "homepage": "https://github.com/Hor1zonZzz/pi-config-manager#readme",
+  "bugs": {
+    "url": "https://github.com/Hor1zonZzz/pi-config-manager/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-coding-agent",
+    "pi-extension",
+    "tui",
+    "tools",
+    "skills",
+    "context"
+  ],
+  "files": [
+    "src",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test && npm run check:package",
+    "check:package": "bash ./scripts/check-package.sh"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@earendil-works/pi-tui": "^0.83.0",
+    "@types/bun": "latest",
+    "@types/node": "^24.12.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
