@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Integrated named presets for model, thinking level, tools, skills, and system-prompt instructions.
+- Added `/preset`, `--preset`, `Ctrl+Shift+U` cycling, the preset selector, and the editor-border preset label.
+- Bundled the `preset-settings` skill with the package.
+
+### Changed
+
+- Unified preset and resource policy persistence in version 2 `pi-config-manager-state` session entries.
+- Config Manager now owns preset policy directly instead of coordinating with a separate preset extension.
+
+### Removed
+
+- **Breaking:** Removed the `preset:tools-changed`, `preset:skills-changed`, and `config-manager:preset-state` integration events.
+- **Breaking:** Removed migration of version 1 `pi-config-manager-state`, `preset-state`, `tools-config`, and `skills-manager-state` session entries. Existing sessions start from current defaults until new version 2 state is written.
+
+### Fixed
+
+- Prevented no-preset startup from clearing the default active tool set before Config Manager initialization.
+
 ## [0.1.0] - 2026-07-31
 
 ### Added

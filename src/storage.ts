@@ -4,6 +4,9 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
 	DEFAULT_RESOURCE_SETTINGS,
 	DEFAULT_SESSION_STATE,
+	type PresetOriginalState,
+	type PresetSessionState,
+	type PresetThinkingLevel,
 	type ResourceSettings,
 	type SessionResourceState,
 } from "./types";
@@ -34,19 +37,61 @@ export function normalizeResourceSettings(value: unknown): ResourceSettings {
 	};
 }
 
+const THINKING_LEVELS = new Set<PresetThinkingLevel>([
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]);
+
+function normalizeOriginalState(value: unknown): PresetOriginalState | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const data = value as Record<string, unknown>;
+	if (
+		!THINKING_LEVELS.has(data.thinkingLevel as PresetThinkingLevel) ||
+		!Array.isArray(data.tools)
+	)
+		return undefined;
+	return {
+		provider: typeof data.provider === "string" ? data.provider : undefined,
+		model: typeof data.model === "string" ? data.model : undefined,
+		thinkingLevel: data.thinkingLevel as PresetThinkingLevel,
+		tools: strings(data.tools),
+	};
+}
+
+function normalizePresetState(value: unknown): PresetSessionState | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const data = value as Record<string, unknown>;
+	const originalState = normalizeOriginalState(data.originalState);
+	if (typeof data.name !== "string" || !originalState) return undefined;
+	return {
+		name: data.name,
+		customTools: data.customTools === true,
+		appliedTools: Array.isArray(data.appliedTools)
+			? strings(data.appliedTools)
+			: undefined,
+		originalState,
+	};
+}
+
 export function normalizeSessionState(
 	value: unknown,
 ): SessionResourceState | undefined {
 	if (!value || typeof value !== "object") return undefined;
 	const data = value as Record<string, unknown>;
-	if (data.version !== 1) return undefined;
+	if (data.version !== 2) return undefined;
 	return {
-		version: 1,
+		version: 2,
 		tools: Array.isArray(data.tools) ? strings(data.tools) : undefined,
 		enabledSkills: strings(data.enabledSkills),
 		disabledSkills: strings(data.disabledSkills),
 		enabledContexts: strings(data.enabledContexts),
 		disabledContexts: strings(data.disabledContexts),
+		preset: normalizePresetState(data.preset),
 	};
 }
 
@@ -112,5 +157,17 @@ export function cloneSessionState(
 		disabledSkills: [...state.disabledSkills],
 		enabledContexts: [...state.enabledContexts],
 		disabledContexts: [...state.disabledContexts],
+		preset: state.preset
+			? {
+					...state.preset,
+					appliedTools: state.preset.appliedTools
+						? [...state.preset.appliedTools]
+						: undefined,
+					originalState: {
+						...state.preset.originalState,
+						tools: [...state.preset.originalState.tools],
+					},
+				}
+			: undefined,
 	};
 }

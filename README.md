@@ -14,7 +14,8 @@ Pi Config Manager is a resource-policy extension for [Pi Coding Agent](https://g
 - Context Monitor showing how the selected resource contributes to the model-visible prompt
 - A compact resource HUD above the editor
 - Source-aware extension toggles saved through Pi's public settings APIs
-- Optional event API for presets, read-only modes, and other policy extensions
+- Built-in named presets for model, thinking level, tools, skills, and instructions
+- Optional runtime-layer event API for read-only modes and other policy extensions
 - No telemetry and no network requests
 
 ## Requirements
@@ -83,6 +84,8 @@ Keybinding-aware actions follow Pi's configured TUI keybindings.
 | `/skills` | Open the Skills tab |
 | `/contexts` | Open the Context Files tab |
 | `/extensions` | Open the Extensions tab |
+| `/preset` | Select or clear a named preset |
+| `/preset <name>` | Activate a named preset directly |
 
 Global defaults can also be changed directly:
 
@@ -99,7 +102,7 @@ Global defaults can also be changed directly:
 | **Default** | Writes global choices to `~/.pi/agent/resource-settings.json`; new sessions inherit them | Your normal tool, skill, and context setup |
 | **Session** | Stores overrides in the current session branch | Temporary changes for one task or conversation branch |
 
-With no preset integration active, Config Manager opens in **Default** scope. An integration can mark a preset active, in which case it opens in **Session** scope. Press `G` at any time to switch.
+With no active preset, Config Manager opens in **Default** scope. With a named preset active, it opens in **Session** scope. Press `G` at any time to switch.
 
 Trusted projects may add repository-specific defaults in `.pi/resource-settings.json`. The visual Default scope edits global defaults; project files stay source-controlled and are edited separately.
 
@@ -163,9 +166,37 @@ Schema:
 }
 ```
 
-Session overrides are stored as `pi-config-manager-state` entries in Pi's session tree, so `/tree`, resume, and branch navigation restore the correct policy.
+Session overrides and the active preset are stored together as version 2 `pi-config-manager-state` entries in Pi's session tree, so `/tree`, resume, and branch navigation restore the correct policy.
 
-For migration from earlier standalone resource extensions, a session branch without `pi-config-manager-state` can import legacy `tools-config` and `skills-manager-state` entries. The first run can also import `disabledSkills` from the legacy global `skill-settings.json` file.
+Version 2 is an intentional breaking reset. Version 1 `pi-config-manager-state`, standalone `preset-state`, `tools-config`, and `skills-manager-state` entries are not imported.
+
+## Presets
+
+Config Manager loads named presets from:
+
+```text
+~/.pi/agent/presets.json
+.pi/presets.json
+```
+
+Project-local presets are loaded only for trusted projects and override global presets with the same name. Each preset may configure:
+
+```json
+{
+  "review": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "thinkingLevel": "high",
+    "tools": ["read", "bash"],
+    "skills": ["preset-settings"],
+    "instructions": "Review carefully before making changes."
+  }
+}
+```
+
+Use `/preset`, `/preset <name>`, `pi --preset <name>`, or `Ctrl+Shift+U`. Selecting `(none)` restores the model, thinking level, and base tool policy captured before the first preset was activated. An explicit empty `tools` or `skills` array enables none; omitting either field preserves the corresponding normal policy. Preset instructions are appended to the system prompt while the preset is active.
+
+The package includes the `preset-settings` skill for safely editing these files.
 
 ## Policy precedence
 
@@ -195,27 +226,9 @@ pi.events.emit("config-manager:layer-clear", {
 
 Layers compose by ID. Required tools are added after disabled tools for each layer, and only discovered tools can be activated.
 
-### Preset compatibility
+To observe resource counts, listen for `config-manager:state-changed`. Emit `config-manager:request-snapshot` to request an immediate snapshot.
 
-Config Manager listens for:
-
-```typescript
-pi.events.emit("preset:tools-changed", {
-  tools: ["read", "bash"],
-  resetSessionOverride: true,
-});
-
-pi.events.emit("preset:skills-changed", {
-  skills: ["review"],
-  resetSessionOverride: true,
-});
-
-pi.events.emit("config-manager:preset-state", {
-  name: "review",
-});
-```
-
-To observe counts, listen for `config-manager:state-changed`. Emit `config-manager:request-snapshot` to request an immediate snapshot.
+The former `preset:tools-changed`, `preset:skills-changed`, and `config-manager:preset-state` integration events have been removed. Presets are now owned directly by Config Manager.
 
 ## Limitations and security
 

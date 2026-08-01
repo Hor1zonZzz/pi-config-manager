@@ -1,5 +1,6 @@
 import { basename, dirname } from "node:path";
 import {
+	DynamicBorder,
 	formatSkillsForPrompt,
 	type BuildSystemPromptOptions,
 	type ExtensionAPI,
@@ -10,9 +11,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
 	type Component,
+	Container,
 	type Focusable,
 	Input,
+	Key,
 	type KeybindingsManager,
+	type SelectItem,
+	SelectList,
+	Text,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
@@ -22,6 +28,16 @@ import {
 	resolveExtensions,
 	saveExtensionChanges,
 } from "./extensions";
+import {
+	installPresetEditor,
+	type PresetBorderEditor,
+} from "./preset-editor";
+import {
+	describePreset,
+	loadPresets,
+	type Preset,
+	type PresetsConfig,
+} from "./presets";
 import {
 	cloneSessionState,
 	loadGlobalSettings,
@@ -34,6 +50,7 @@ import {
 	type ContextRecord,
 	type ExtensionChange,
 	type ManagerSnapshot,
+	type PresetOriginalState,
 	type ResourceSettings,
 	type ResourceTab,
 	type RuntimeLayer,
@@ -730,6 +747,10 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	let sessionState: SessionResourceState = cloneSessionState(
 		DEFAULT_SESSION_STATE,
 	);
+	let presets: PresetsConfig = {};
+	let activePresetName: string | undefined;
+	let activePreset: Preset | undefined;
+	let activePresetEditor: PresetBorderEditor | undefined;
 	let presetTools: string[] | undefined;
 	let presetSkills: Set<string> | undefined;
 	let defaultTools = new Set<string>();
@@ -761,34 +782,10 @@ export default function piConfigManager(pi: ExtensionAPI) {
 
 	function restoreSession(ctx: ExtensionContext): void {
 		sessionState = cloneSessionState(DEFAULT_SESSION_STATE);
-		const branch = ctx.sessionManager.getBranch();
-		const hasUnifiedState = branch.some(
-			(entry) => entry.type === "custom" && entry.customType === SESSION_ENTRY,
-		);
-		for (const entry of branch) {
-			if (entry.type !== "custom") continue;
-			if (entry.customType === SESSION_ENTRY) {
-				const restored = normalizeSessionState(entry.data);
-				if (restored) sessionState = restored;
-			}
-			if (!hasUnifiedState && entry.customType === "tools-config") {
-				const tools = (entry.data as { enabledTools?: unknown } | undefined)
-					?.enabledTools;
-				if (Array.isArray(tools))
-					sessionState.tools = unique(
-						tools.filter((item): item is string => typeof item === "string"),
-					);
-			}
-			if (!hasUnifiedState && entry.customType === "skills-manager-state") {
-				const data = entry.data as any;
-				if (data?.mode === "reset") {
-					sessionState.enabledSkills = [];
-					sessionState.disabledSkills = [];
-				} else if (data?.mode === "override") {
-					sessionState.enabledSkills = unique(data.enabledSkills ?? []);
-					sessionState.disabledSkills = unique(data.disabledSkills ?? []);
-				}
-			}
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "custom" || entry.customType !== SESSION_ENTRY) continue;
+			const restored = normalizeSessionState(entry.data);
+			if (restored) sessionState = restored;
 		}
 	}
 
@@ -922,6 +919,238 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		reconcileTools();
 	}
 
+	function getPresetLabel(): string {
+		const mode = activePresetName ?? "default";
+		return sessionState.preset?.customTools
+			? `${mode} (custom tools)`
+			: mode;
+	}
+
+	function updatePresetStatus(ctx: ExtensionContext): void {
+		snapshot = { ...snapshot, presetName: activePresetName };
+		ctx.ui.setStatus("preset", undefined);
+		ctx.ui.setWidget("preset", undefined);
+		activePresetEditor?.requestRender();
+		requestHudRender?.();
+	}
+
+	function setPresetSkills(preset: Preset | undefined): void {
+		presetSkills = preset?.skills ? new Set(preset.skills) : undefined;
+		snapshot = {
+			...snapshot,
+			enabledSkills: resolveEnabledSkills(snapshot.skills),
+		};
+	}
+
+	function currentOriginalState(ctx: ExtensionContext): PresetOriginalState {
+		return {
+			provider: ctx.model?.provider,
+			model: ctx.model?.id,
+			thinkingLevel: pi.getThinkingLevel(),
+			tools: Array.from(resolveBaseTools()),
+		};
+	}
+
+	function validatedPresetTools(
+		name: string,
+		preset: Preset,
+		ctx: ExtensionContext,
+	): string[] | undefined {
+		if (!preset.tools) return undefined;
+		const discovered = new Set(pi.getAllTools().map((tool) => tool.name));
+		const valid = preset.tools.filter((tool) => discovered.has(tool));
+		const invalid = preset.tools.filter((tool) => !discovered.has(tool));
+		if (invalid.length > 0) {
+			ctx.ui.notify(
+				`Preset "${name}": Unknown tools: ${invalid.join(", ")}`,
+				"warning",
+			);
+		}
+		return unique(valid);
+	}
+
+	async function applyPreset(
+		name: string,
+		preset: Preset,
+		ctx: ExtensionContext,
+	): Promise<void> {
+		const originalState =
+			sessionState.preset?.originalState ?? currentOriginalState(ctx);
+		const configuredTools = validatedPresetTools(name, preset, ctx);
+		const appliedTools = configuredTools ?? Array.from(resolveBaseTools());
+
+		if (preset.provider && preset.model) {
+			const model = ctx.modelRegistry.find(preset.provider, preset.model);
+			if (!model) {
+				ctx.ui.notify(
+					`Preset "${name}": Model ${preset.provider}/${preset.model} not found`,
+					"warning",
+				);
+			} else if (!(await pi.setModel(model))) {
+				ctx.ui.notify(
+					`Preset "${name}": No API key for ${preset.provider}/${preset.model}`,
+					"warning",
+				);
+			}
+		}
+		if (preset.thinkingLevel) pi.setThinkingLevel(preset.thinkingLevel);
+
+		activePresetName = name;
+		activePreset = preset;
+		presetTools = appliedTools;
+		sessionState.tools = undefined;
+		sessionState.enabledSkills = [];
+		sessionState.disabledSkills = [];
+		sessionState.preset = {
+			name,
+			customTools: false,
+			appliedTools,
+			originalState,
+		};
+		setPresetSkills(preset);
+		reconcileTools();
+		persistSession();
+		updatePresetStatus(ctx);
+	}
+
+	async function clearPreset(ctx: ExtensionContext): Promise<void> {
+		const originalState = sessionState.preset?.originalState;
+		activePresetName = undefined;
+		activePreset = undefined;
+		presetTools = undefined;
+		presetSkills = undefined;
+		sessionState.preset = undefined;
+		sessionState.tools = originalState?.tools ?? Array.from(defaultTools);
+		sessionState.enabledSkills = [];
+		sessionState.disabledSkills = [];
+		if (originalState?.provider && originalState.model) {
+			const model = ctx.modelRegistry.find(
+				originalState.provider,
+				originalState.model,
+			);
+			if (model) await pi.setModel(model);
+		}
+		if (originalState) pi.setThinkingLevel(originalState.thinkingLevel);
+		snapshot = {
+			...snapshot,
+			enabledSkills: resolveEnabledSkills(snapshot.skills),
+		};
+		reconcileTools();
+		persistSession();
+		updatePresetStatus(ctx);
+	}
+
+	function restorePresetPolicy(ctx: ExtensionContext): void {
+		const state = sessionState.preset;
+		const preset = state ? presets[state.name] : undefined;
+		if (!state || !preset) {
+			activePresetName = undefined;
+			activePreset = undefined;
+			presetTools = undefined;
+			presetSkills = undefined;
+			if (state) sessionState.preset = undefined;
+			updatePresetStatus(ctx);
+			return;
+		}
+		activePresetName = state.name;
+		activePreset = preset;
+		presetTools =
+			state.appliedTools ??
+			preset.tools?.filter((tool) =>
+				pi.getAllTools().some((candidate) => candidate.name === tool),
+			);
+		setPresetSkills(preset);
+		updatePresetStatus(ctx);
+	}
+
+	async function showPresetSelector(ctx: ExtensionContext): Promise<void> {
+		const names = Object.keys(presets);
+		if (names.length === 0) {
+			ctx.ui.notify("No presets defined in global or project presets.json", "warning");
+			return;
+		}
+		const items: SelectItem[] = names.flatMap((name) => {
+			const preset = presets[name];
+			return preset
+				? [
+						{
+							value: name,
+							label: name === activePresetName ? `${name} (active)` : name,
+							description: describePreset(preset),
+						},
+					]
+				: [];
+		});
+		items.push({
+			value: "(none)",
+			label: "(none)",
+			description: "Clear active preset, restore defaults",
+		});
+		const result = await ctx.ui.custom<string | null>(
+			(tui, theme, _keybindings, done) => {
+				const container = new Container();
+				container.addChild(new DynamicBorder((text) => theme.fg("accent", text)));
+				container.addChild(
+					new Text(theme.fg("accent", theme.bold("Select Preset"))),
+				);
+				const list = new SelectList(items, Math.min(items.length, 10), {
+					selectedPrefix: (text) => theme.fg("accent", text),
+					selectedText: (text) => theme.fg("accent", text),
+					description: (text) => theme.fg("muted", text),
+					scrollInfo: (text) => theme.fg("dim", text),
+					noMatch: (text) => theme.fg("warning", text),
+				});
+				list.onSelect = (item) => done(item.value);
+				list.onCancel = () => done(null);
+				container.addChild(list);
+				container.addChild(
+					new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel")),
+				);
+				container.addChild(new DynamicBorder((text) => theme.fg("accent", text)));
+				return {
+					render: (width: number) => container.render(width),
+					invalidate: () => container.invalidate(),
+					handleInput(data: string) {
+						list.handleInput(data);
+						tui.requestRender();
+					},
+				};
+			},
+		);
+		if (!result) return;
+		if (result === "(none)") {
+			await clearPreset(ctx);
+			ctx.ui.notify("Preset cleared, defaults restored", "info");
+			return;
+		}
+		const preset = presets[result];
+		if (!preset) return;
+		await applyPreset(result, preset, ctx);
+		ctx.ui.notify(`Preset "${result}" activated`, "info");
+	}
+
+	async function cyclePreset(ctx: ExtensionContext): Promise<void> {
+		const names = Object.keys(presets).sort((a, b) => a.localeCompare(b));
+		if (names.length === 0) {
+			ctx.ui.notify("No presets defined in global or project presets.json", "warning");
+			return;
+		}
+		const cycle = ["(none)", ...names];
+		const current = activePresetName ?? "(none)";
+		const currentIndex = cycle.indexOf(current);
+		const next = cycle[currentIndex < 0 ? 0 : (currentIndex + 1) % cycle.length];
+		if (!next) return;
+		if (next === "(none)") {
+			await clearPreset(ctx);
+			ctx.ui.notify("Preset cleared, defaults restored", "info");
+			return;
+		}
+		const preset = presets[next];
+		if (!preset) return;
+		await applyPreset(next, preset, ctx);
+		ctx.ui.notify(`Preset "${next}" activated`, "info");
+	}
+
 	function updatePromptInventory(options: BuildSystemPromptOptions): void {
 		const skills: SkillRecord[] = (options.skills ?? [])
 			.map((skill: any) => ({
@@ -1029,7 +1258,11 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		};
 	}
 
-	function toggleSessionResource(tab: ResourceTab, id: string): void {
+	function toggleSessionResource(
+		tab: ResourceTab,
+		id: string,
+		ctx: ExtensionContext,
+	): void {
 		if (tab === "tools") {
 			const wasEffective = snapshot.activeTools.has(id);
 			externalTools.delete(id);
@@ -1037,9 +1270,10 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			if (wasEffective) base.delete(id);
 			else base.add(id);
 			sessionState.tools = unique(base);
+			if (sessionState.preset) sessionState.preset.customTools = true;
 			reconcileTools();
 			persistSession();
-			pi.events.emit("tools:changed", { tools: sessionState.tools });
+			updatePresetStatus(ctx);
 			return;
 		}
 		if (tab === "skills") {
@@ -1182,7 +1416,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 								ctx,
 							);
 						} else if (tab !== "overview") {
-							toggleSessionResource(tab, id);
+							toggleSessionResource(tab, id, ctx);
 							updatePromptInventory(ctx.getSystemPromptOptions());
 							updateToolsInventory();
 						}
@@ -1295,56 +1529,36 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		description: "Manage Pi extensions",
 		handler: async (_args, ctx) => showManager("extensions", ctx),
 	});
+	pi.registerCommand("preset", {
+		description: "Switch preset configuration",
+		handler: async (args, ctx) => {
+			const name = args.trim();
+			if (!name) {
+				await showPresetSelector(ctx);
+				return;
+			}
+			const preset = presets[name];
+			if (!preset) {
+				const available = Object.keys(presets).join(", ") || "(none defined)";
+				ctx.ui.notify(
+					`Unknown preset "${name}". Available: ${available}`,
+					"error",
+				);
+				return;
+			}
+			await applyPreset(name, preset, ctx);
+			ctx.ui.notify(`Preset "${name}" activated`, "info");
+		},
+	});
+	pi.registerShortcut(Key.ctrlShift("u"), {
+		description: "Cycle presets",
+		handler: cyclePreset,
+	});
+	pi.registerFlag("preset", {
+		description: "Preset configuration to use",
+		type: "string",
+	});
 
-	pi.events.on("preset:tools-changed", (event) => {
-		const data = event as {
-			tools?: unknown;
-			resetSessionOverride?: unknown;
-			clearPreset?: unknown;
-		};
-		const tools = Array.isArray(data.tools)
-			? unique(
-					data.tools.filter((item): item is string => typeof item === "string"),
-				)
-			: undefined;
-		if (data.clearPreset === true) {
-			presetTools = undefined;
-			sessionState.tools = tools;
-		} else {
-			presetTools = tools;
-			if (data.resetSessionOverride === true) sessionState.tools = undefined;
-		}
-		updateToolsInventory();
-		persistSession();
-	});
-	pi.events.on("preset:skills-changed", (event) => {
-		const data = event as { skills?: unknown; resetSessionOverride?: unknown };
-		presetSkills = Array.isArray(data.skills)
-			? new Set(
-					data.skills.filter(
-						(item): item is string => typeof item === "string",
-					),
-				)
-			: undefined;
-		if (data.resetSessionOverride === true) {
-			sessionState.enabledSkills = [];
-			sessionState.disabledSkills = [];
-		}
-		snapshot = {
-			...snapshot,
-			enabledSkills: resolveEnabledSkills(snapshot.skills),
-		};
-		persistSession();
-		requestHudRender?.();
-	});
-	pi.events.on("config-manager:preset-state", (event) => {
-		const name = (event as { name?: unknown }).name;
-		snapshot = {
-			...snapshot,
-			presetName: typeof name === "string" ? name : undefined,
-		};
-		requestHudRender?.();
-	});
 	pi.events.on("config-manager:layer-set", (event) => {
 		const data = event as {
 			id?: unknown;
@@ -1442,6 +1656,9 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				"warning",
 			);
 		}
+		if (activePreset?.instructions) {
+			systemPrompt = `${systemPrompt}\n\n${activePreset.instructions}`;
+		}
 		return systemPrompt === event.systemPrompt ? undefined : { systemPrompt };
 	});
 
@@ -1461,15 +1678,30 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		updateToolsInventory();
 	});
 
-	pi.on("session_start", (_event, ctx) => {
+	pi.on("session_start", async (_event, ctx) => {
 		promptWarnings.clear();
 		defaultTools = new Set(pi.getActiveTools());
 		externalTools = new Set();
 		lastAppliedTools = new Set();
 		hasAppliedTools = false;
+		activePresetEditor = undefined;
 		globalSettings = loadGlobalSettings();
 		projectSettings = loadProjectSettings(ctx.cwd, ctx.isProjectTrusted());
+		presets = loadPresets(ctx.cwd, ctx.isProjectTrusted());
 		restoreSession(ctx);
+		const presetFlag = pi.getFlag("preset");
+		if (typeof presetFlag === "string" && presetFlag) {
+			sessionState.tools = undefined;
+			sessionState.enabledSkills = [];
+			sessionState.disabledSkills = [];
+			sessionState.preset = undefined;
+			activePresetName = undefined;
+			activePreset = undefined;
+			presetTools = undefined;
+			presetSkills = undefined;
+		} else {
+			restorePresetPolicy(ctx);
+		}
 		snapshot = {
 			...snapshot,
 			ready: false,
@@ -1480,15 +1712,35 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			skills: [],
 			contexts: [],
 			extensions: [],
+			presetName: activePresetName,
 		};
 		updateToolsInventory();
 		refreshSkillsFromCommands();
+		installPresetEditor(ctx, getPresetLabel, (editor) => {
+			activePresetEditor = editor;
+		});
 		installHud(ctx);
+		if (typeof presetFlag === "string" && presetFlag) {
+			const preset = presets[presetFlag];
+			if (preset) {
+				await applyPreset(presetFlag, preset, ctx);
+				ctx.ui.notify(`Preset "${presetFlag}" activated`, "info");
+			} else {
+				const available = Object.keys(presets).join(", ") || "(none defined)";
+				ctx.ui.notify(
+					`Unknown preset "${presetFlag}". Available: ${available}`,
+					"warning",
+				);
+			}
+		}
+		updatePresetStatus(ctx);
 		scheduleSettledRefresh(ctx);
 	});
 	pi.on("session_tree", (_event, ctx) => {
 		externalTools = new Set();
+		presets = loadPresets(ctx.cwd, ctx.isProjectTrusted());
 		restoreSession(ctx);
+		restorePresetPolicy(ctx);
 		updateToolsInventory();
 		snapshot = {
 			...snapshot,
@@ -1496,7 +1748,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			enabledSkills: resolveEnabledSkills(snapshot.skills),
 			enabledContexts: resolveEnabledContexts(snapshot.contexts),
 		};
-		requestHudRender?.();
+		updatePresetStatus(ctx);
 	});
 	pi.on("session_shutdown", (_event, ctx) => {
 		if (settleTimer) clearTimeout(settleTimer);

@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { formatSkillsForPrompt } from "@earendil-works/pi-coding-agent";
 import piConfigManager from "../src/index";
+import { loadPresets } from "../src/presets";
 import {
 	isDirectFilePackage,
 	saveExtensionChanges,
@@ -51,6 +52,8 @@ interface HarnessOptions {
 	trusted?: boolean;
 	systemPrompt?: string;
 	promptOptions?: Record<string, unknown>;
+	presetFlag?: string;
+	models?: Array<{ provider: string; id: string; authenticated?: boolean }>;
 }
 
 const tempRoots: string[] = [];
@@ -126,6 +129,8 @@ function createHarness(options: HarnessOptions = {}) {
 		...(options.activeTools ?? tools.map((tool) => tool.name)),
 	];
 	const commands = new Map<string, any>();
+	const flags = new Map<string, any>();
+	const shortcuts = new Map<string, any>();
 	const lifecycle = new Map<string, Array<(event: any, ctx: any) => any>>();
 	const eventListeners = new Map<string, Array<(event: any) => any>>();
 	const emissions: Array<{ name: string; data: any }> = [];
@@ -145,6 +150,10 @@ function createHarness(options: HarnessOptions = {}) {
 	let customImplementation:
 		| ((factory: any, customOptions: any) => Promise<any>)
 		| undefined;
+	let editorFactory: any;
+	let thinkingLevel = "medium";
+	let currentModel = { provider: "fixture", id: "base", authenticated: true };
+	const models = options.models ?? [currentModel];
 
 	const events = {
 		on(name: string, handler: (event: any) => any) {
@@ -162,6 +171,15 @@ function createHarness(options: HarnessOptions = {}) {
 		events,
 		registerCommand(name: string, command: any) {
 			commands.set(name, command);
+		},
+		registerFlag(name: string, flag: any) {
+			flags.set(name, flag);
+		},
+		getFlag(name: string) {
+			return name === "preset" ? options.presetFlag : undefined;
+		},
+		registerShortcut(key: string, shortcut: any) {
+			shortcuts.set(key, shortcut);
 		},
 		on(name: string, handler: (event: any, ctx: any) => any) {
 			const handlers = lifecycle.get(name) ?? [];
@@ -194,6 +212,17 @@ function createHarness(options: HarnessOptions = {}) {
 				},
 			}));
 		},
+		getThinkingLevel() {
+			return thinkingLevel;
+		},
+		setThinkingLevel(level: string) {
+			thinkingLevel = level;
+		},
+		async setModel(model: any) {
+			if (model.authenticated === false) return false;
+			currentModel = model;
+			return true;
+		},
 	};
 
 	const ui = {
@@ -212,6 +241,13 @@ function createHarness(options: HarnessOptions = {}) {
 		async confirm() {
 			return false;
 		},
+		getEditorComponent() {
+			return editorFactory;
+		},
+		setEditorComponent(factory: any) {
+			editorFactory = factory;
+		},
+		setStatus() {},
 	};
 
 	const ctx = {
@@ -225,6 +261,16 @@ function createHarness(options: HarnessOptions = {}) {
 		isProjectTrusted: () => options.trusted ?? false,
 		getSystemPrompt: () => systemPrompt,
 		getSystemPromptOptions: () => promptOptions,
+		get model() {
+			return currentModel;
+		},
+		modelRegistry: {
+			find(provider: string, id: string) {
+				return models.find(
+					(model) => model.provider === provider && model.id === id,
+				);
+			},
+		},
 	};
 
 	piConfigManager(pi as any);
@@ -249,12 +295,16 @@ function createHarness(options: HarnessOptions = {}) {
 	return {
 		commands,
 		ctx,
+		flags,
+		shortcuts,
 		emissions,
 		entries,
 		events,
 		notifications,
 		widgets,
 		getActiveTools: () => [...activeTools],
+		getModel: () => currentModel,
+		getThinkingLevel: () => thinkingLevel,
 		setExternalActiveTools: (names: string[]) => {
 			activeTools = [...names];
 		},
@@ -286,6 +336,15 @@ function readResourceSettings(): any {
 	);
 }
 
+function writePresets(value: unknown, root = agentDir) {
+	mkdirSync(root, { recursive: true });
+	writeFileSync(
+		join(root, "presets.json"),
+		`${JSON.stringify(value, null, 2)}\n`,
+		"utf8",
+	);
+}
+
 describe("storage compatibility", () => {
 	test("normalizes resource and session state without sharing mutable arrays", () => {
 		expect(
@@ -299,10 +358,10 @@ describe("storage compatibility", () => {
 			disabledSkills: ["alpha", "zeta"],
 			disabledContexts: [],
 		});
-		expect(normalizeSessionState({ version: 2 })).toBeUndefined();
+		expect(normalizeSessionState({ version: 1 })).toBeUndefined();
 
 		const normalized = normalizeSessionState({
-			version: 1,
+			version: 2,
 			tools: ["bash", "read", "bash"],
 			enabledSkills: ["browser"],
 			disabledSkills: [],
@@ -310,12 +369,13 @@ describe("storage compatibility", () => {
 			disabledContexts: ["/tmp/AGENTS.md"],
 		});
 		expect(normalized).toEqual({
-			version: 1,
+			version: 2,
 			tools: ["bash", "read"],
 			enabledSkills: ["browser"],
 			disabledSkills: [],
 			enabledContexts: [],
 			disabledContexts: ["/tmp/AGENTS.md"],
+			preset: undefined,
 		});
 
 		const cloned = cloneSessionState(normalized ?? DEFAULT_SESSION_STATE);
@@ -434,9 +494,12 @@ describe("manager behavior contract", () => {
 				"config-manager",
 				"contexts",
 				"extensions",
+				"preset",
 				"skills",
 				"tools",
 			]);
+			expect(harness.flags.has("preset")).toBe(true);
+			expect(harness.shortcuts.size).toBe(1);
 			expect(harness.getActiveTools()).toEqual(["read"]);
 			expect(harness.widgets.has("pi-config-manager")).toBe(true);
 			const state = harness.emissions
@@ -451,7 +514,7 @@ describe("manager behavior contract", () => {
 		}
 	});
 
-	test("preserves session, preset, runtime-layer, and external-tool precedence", async () => {
+	test("preserves session, runtime-layer, and external-tool precedence", async () => {
 		const harness = createHarness({
 			tools: [
 				{ name: "read" },
@@ -465,7 +528,7 @@ describe("manager behavior contract", () => {
 					type: "custom",
 					customType: "pi-config-manager-state",
 					data: {
-						version: 1,
+						version: 2,
 						tools: ["edit", "missing-tool"],
 						enabledSkills: [],
 						disabledSkills: [],
@@ -478,76 +541,216 @@ describe("manager behavior contract", () => {
 		await harness.start();
 		try {
 			expect(harness.getActiveTools()).toEqual(["edit"]);
-
-			harness.events.emit("preset:tools-changed", {
-				tools: ["read"],
-				resetSessionOverride: false,
-			});
-			expect(harness.getActiveTools()).toEqual(["edit"]);
-
-			harness.events.emit("preset:tools-changed", {
-				tools: ["read"],
-				resetSessionOverride: true,
-			});
-			expect(harness.getActiveTools()).toEqual(["read"]);
-
 			harness.events.emit("config-manager:layer-set", {
 				id: "plan-mode",
-				disableTools: ["read"],
+				disableTools: ["edit"],
 				requireTools: ["bash", "missing-tool"],
 			});
 			expect(harness.getActiveTools()).toEqual(["bash"]);
-
 			harness.setExternalActiveTools(["bash", "questionnaire"]);
 			await harness.trigger("turn_start");
 			expect(harness.getActiveTools()).toEqual(["questionnaire", "bash"]);
-
 			harness.events.emit("config-manager:layer-clear", { id: "plan-mode" });
-			expect(harness.getActiveTools()).toEqual(["read", "questionnaire"]);
-
-			harness.events.emit("config-manager:layer-set", {
-				id: "malformed-layer",
-				disableTools: "read",
-				requireTools: { name: "bash" },
-			});
-			expect(harness.getActiveTools()).toEqual(["read", "questionnaire"]);
+			expect(harness.getActiveTools()).toEqual(["edit", "questionnaire"]);
 		} finally {
 			await harness.shutdown();
 		}
 	});
 
-	test("restores legacy tool and skill session entries", async () => {
+	test("ignores legacy and version 1 session entries after the breaking state reset", async () => {
 		const harness = createHarness({
 			tools: [{ name: "read" }, { name: "bash" }],
 			activeTools: ["read", "bash"],
-			skills: [
-				{ name: "alpha", description: "Alpha", path: "/skills/alpha/SKILL.md" },
-				{ name: "beta", description: "Beta", path: "/skills/beta/SKILL.md" },
-			],
 			branch: [
+				{
+					type: "custom",
+					customType: "pi-config-manager-state",
+					data: { version: 1, tools: ["bash"] },
+				},
 				{
 					type: "custom",
 					customType: "tools-config",
 					data: { enabledTools: ["bash"] },
 				},
+			],
+		});
+		await harness.start();
+		try {
+			expect(harness.getActiveTools()).toEqual(["read", "bash"]);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("loads global presets and overlays only trusted project presets", () => {
+		writePresets({
+			shared: { model: "global", tools: ["read"] },
+			globalOnly: { instructions: "global" },
+		});
+		writePresets(
+			{
+				shared: { model: "project", tools: [] },
+				projectOnly: { thinkingLevel: "high" },
+			},
+			join(cwd, ".pi"),
+		);
+		expect(loadPresets(cwd, false)).toEqual({
+			shared: { model: "global", tools: ["read"] },
+			globalOnly: { instructions: "global" },
+		});
+		expect(loadPresets(cwd, true)).toEqual({
+			shared: { model: "project", tools: [] },
+			globalOnly: { instructions: "global" },
+			projectOnly: { thinkingLevel: "high" },
+		});
+	});
+
+	test("keeps all default tools active when no preset is selected", async () => {
+		const harness = createHarness({
+			tools: [{ name: "read" }, { name: "bash" }, { name: "herdr_agent" }],
+			activeTools: ["read", "bash", "herdr_agent"],
+		});
+		await harness.start();
+		try {
+			expect(harness.getActiveTools()).toEqual([
+				"read",
+				"bash",
+				"herdr_agent",
+			]);
+			expect(
+				harness.emissions.some((event) => event.name.startsWith("preset:")),
+			).toBe(false);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("applies and clears an integrated preset", async () => {
+		writePresets({
+			focus: {
+				provider: "fixture",
+				model: "focused",
+				thinkingLevel: "high",
+				tools: ["read"],
+				skills: ["alpha"],
+				instructions: "FOCUS INSTRUCTIONS",
+			},
+		});
+		const skills: SkillFixture[] = [
+			{ name: "alpha", description: "Alpha", path: "/skills/alpha/SKILL.md" },
+			{ name: "beta", description: "Beta", path: "/skills/beta/SKILL.md" },
+		];
+		const promptSkills = skills.map((skill) => ({
+			name: skill.name,
+			description: skill.description,
+			filePath: skill.path,
+			baseDir: "/skills",
+			sourceInfo: {
+				path: skill.path,
+				source: "fixture",
+				scope: "temporary" as const,
+				origin: "top-level" as const,
+			},
+			disableModelInvocation: false,
+		}));
+		const systemPrompt = `Base${formatSkillsForPrompt(promptSkills)}`;
+		const promptOptions = {
+			selectedTools: ["read", "bash"],
+			toolSnippets: {},
+			skills: promptSkills,
+			contextFiles: [],
+		};
+		const harness = createHarness({
+			tools: [{ name: "read" }, { name: "bash" }],
+			activeTools: ["read", "bash"],
+			skills,
+			systemPrompt,
+			promptOptions,
+			models: [
+				{ provider: "fixture", id: "base" },
+				{ provider: "fixture", id: "focused" },
+			],
+		});
+		await harness.start();
+		try {
+			await harness.commands.get("preset").handler("focus", harness.ctx);
+			expect(harness.getActiveTools()).toEqual(["read"]);
+			expect(harness.getModel().id).toBe("focused");
+			expect(harness.getThinkingLevel()).toBe("high");
+			const result = await harness.trigger("before_agent_start", {
+				systemPrompt,
+				systemPromptOptions: promptOptions,
+			});
+			expect(result.systemPrompt).toContain("alpha");
+			expect(result.systemPrompt).not.toContain("beta");
+			expect(result.systemPrompt).toEndWith("FOCUS INSTRUCTIONS");
+			const state = harness.entries
+				.filter((entry) => entry.customType === "pi-config-manager-state")
+				.at(-1)?.data;
+			expect(state).toMatchObject({
+				version: 2,
+				preset: {
+					name: "focus",
+					customTools: false,
+					appliedTools: ["read"],
+				},
+			});
+
+			const shortcut = Array.from(harness.shortcuts.values())[0];
+			await shortcut.handler(harness.ctx);
+			expect(harness.getActiveTools()).toEqual(["read", "bash"]);
+			expect(harness.getModel().id).toBe("base");
+			expect(harness.getThinkingLevel()).toBe("medium");
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("restores version 2 preset policy from the active session branch", async () => {
+		writePresets({
+			review: { tools: ["read"], instructions: "REVIEW MODE" },
+		});
+		const harness = createHarness({
+			tools: [{ name: "read" }, { name: "bash" }],
+			activeTools: ["read", "bash"],
+			branch: [
 				{
 					type: "custom",
-					customType: "skills-manager-state",
+					customType: "pi-config-manager-state",
 					data: {
-						mode: "override",
-						enabledSkills: ["alpha"],
-						disabledSkills: ["beta"],
+						version: 2,
+						enabledSkills: [],
+						disabledSkills: [],
+						enabledContexts: [],
+						disabledContexts: [],
+						preset: {
+							name: "review",
+							customTools: false,
+							appliedTools: ["read"],
+							originalState: {
+								provider: "fixture",
+								model: "base",
+								thinkingLevel: "medium",
+								tools: ["read", "bash"],
+							},
+						},
 					},
 				},
 			],
 		});
 		await harness.start();
 		try {
-			expect(harness.getActiveTools()).toEqual(["bash"]);
-			const snapshotRequestCount = harness.emissions.filter(
-				(event) => event.name === "config-manager:state-changed",
-			).length;
-			expect(snapshotRequestCount).toBeGreaterThan(0);
+			expect(harness.getActiveTools()).toEqual(["read"]);
+			const result = await harness.trigger("before_agent_start", {
+				systemPrompt: "Base",
+				systemPromptOptions: {
+					selectedTools: ["read"],
+					toolSnippets: {},
+					skills: [],
+					contextFiles: [],
+				},
+			});
+			expect(result.systemPrompt).toBe("Base\n\nREVIEW MODE");
 		} finally {
 			await harness.shutdown();
 		}
@@ -603,7 +806,7 @@ describe("manager behavior contract", () => {
 					type: "custom",
 					customType: "pi-config-manager-state",
 					data: {
-						version: 1,
+						version: 2,
 						tools: ["read"],
 						enabledSkills: [],
 						disabledSkills: ["beta"],

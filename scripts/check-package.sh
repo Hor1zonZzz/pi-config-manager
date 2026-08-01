@@ -9,7 +9,14 @@ cd "$ROOT"
 TARBALL="$(npm pack --silent --pack-destination "$TMP_DIR" | tail -n 1)"
 tar -xzf "$TMP_DIR/$TARBALL" -C "$TMP_DIR"
 
-for file in package/package.json package/README.md package/src/index.ts; do
+for file in \
+  package/package.json \
+  package/README.md \
+  package/THIRD_PARTY_NOTICES.md \
+  package/src/index.ts \
+  package/src/preset-editor.ts \
+  package/src/presets.ts \
+  package/skills/preset-settings/SKILL.md; do
   test -f "$TMP_DIR/$file" || {
     echo "Missing package artifact: $file" >&2
     exit 1

@@ -14,7 +14,8 @@ Pi Config Manager 是 [Pi Coding Agent](https://github.com/earendil-works/pi) �
 - Context Monitor 可查看所选资源对模型可见提示词的贡献
 - 编辑器上方显示紧凑的资源状态 HUD
 - 根据资源来源，通过 Pi 公开设置 API 保存扩展开关
-- 提供可选事件 API，方便预设、只读模式等策略扩展接入
+- 内置命名 Preset，可统一配置模型、思考等级、工具、技能和指令
+- 提供可选运行时策略层事件 API，方便只读模式等扩展接入
 - 无遥测，不发起网络请求
 
 ## 环境要求
@@ -83,6 +84,8 @@ pi -e npm:pi-config-manager
 | `/skills` | 打开 Skills 页 |
 | `/contexts` | 打开 Context Files 页 |
 | `/extensions` | 打开 Extensions 页 |
+| `/preset` | 选择或清除命名 Preset |
+| `/preset <名称>` | 直接激活命名 Preset |
 
 也可以直接修改全局默认值：
 
@@ -99,7 +102,7 @@ pi -e npm:pi-config-manager
 | **Default** | 将全局选择写入 `~/.pi/agent/resource-settings.json`，新会话会继承 | 日常使用的工具、技能和上下文配置 |
 | **Session** | 将覆盖项存储在当前会话分支中 | 针对单个任务或对话分支的临时调整 |
 
-没有预设集成时，Config Manager 默认以 **Default** 作用域打开。其他扩展可以通知 Config Manager 当前已有激活的预设，此时会默认以 **Session** 作用域打开。你可以随时按 `G` 切换。
+没有激活 Preset 时，Config Manager 默认以 **Default** 作用域打开。激活命名 Preset 后，它会默认以 **Session** 作用域打开。你可以随时按 `G` 切换。
 
 受信任的项目可以在 `.pi/resource-settings.json` 中加入项目专属默认值。可视化界面的 Default 作用域只编辑全局默认值；项目文件继续由项目单独维护和纳入版本控制。
 
@@ -163,9 +166,37 @@ pi -e npm:pi-config-manager
 }
 ```
 
-Session 覆盖以 `pi-config-manager-state` 条目存储在 Pi 会话树中，因此 `/tree`、恢复会话和分支导航都能还原对应策略。
+Session 覆盖和当前 Preset 统一存储为版本 2 的 `pi-config-manager-state` 条目，因此 `/tree`、恢复会话和分支导航都能还原对应策略。
 
-为了兼容早期的独立资源扩展，如果当前会话分支还没有 `pi-config-manager-state`，Config Manager 可以导入旧的 `tools-config` 与 `skills-manager-state` 条目。首次运行还可以从旧版全局 `skill-settings.json` 导入 `disabledSkills`。
+版本 2 是有意的破坏性状态重置。版本 1 的 `pi-config-manager-state` 以及独立的 `preset-state`、`tools-config`、`skills-manager-state` 条目不会被导入。
+
+## Preset
+
+Config Manager 从以下位置加载命名 Preset：
+
+```text
+~/.pi/agent/presets.json
+.pi/presets.json
+```
+
+项目 Preset 只会在项目受信任时加载，并覆盖同名的全局 Preset。每个 Preset 可以配置：
+
+```json
+{
+  "review": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "thinkingLevel": "high",
+    "tools": ["read", "bash"],
+    "skills": ["preset-settings"],
+    "instructions": "修改前先认真审查。"
+  }
+}
+```
+
+可以使用 `/preset`、`/preset <名称>`、`pi --preset <名称>` 或 `Ctrl+Shift+U`。选择 `(none)` 会恢复进入第一个 Preset 前记录的模型、思考等级和基础工具策略。显式空的 `tools` 或 `skills` 数组表示全部禁用；省略字段表示保留对应的正常策略。Preset 激活期间，其 `instructions` 会追加到系统提示词。
+
+该包同时提供 `preset-settings` Skill，用于安全编辑这些配置文件。
 
 ## 策略优先级
 
@@ -195,27 +226,9 @@ pi.events.emit("config-manager:layer-clear", {
 
 每个策略层以 ID 区分并参与组合。每层中的必需工具会在禁用工具之后加入，而且只能激活 Pi 已发现的工具。
 
-### 预设兼容
-
-Config Manager 会监听：
-
-```typescript
-pi.events.emit("preset:tools-changed", {
-  tools: ["read", "bash"],
-  resetSessionOverride: true,
-});
-
-pi.events.emit("preset:skills-changed", {
-  skills: ["review"],
-  resetSessionOverride: true,
-});
-
-pi.events.emit("config-manager:preset-state", {
-  name: "review",
-});
-```
-
 如需监听资源数量，可以订阅 `config-manager:state-changed`。发送 `config-manager:request-snapshot` 可以请求管理器立即发布一次快照。
+
+原来的 `preset:tools-changed`、`preset:skills-changed` 和 `config-manager:preset-state` 集成事件已删除；Preset 现在由 Config Manager 直接拥有。
 
 ## 限制与安全说明
 

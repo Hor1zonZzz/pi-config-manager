@@ -17,13 +17,37 @@ export interface ResourceSettings {
 	disabledContexts: string[];
 }
 
+export type PresetThinkingLevel =
+	| "off"
+	| "minimal"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh"
+	| "max";
+
+export interface PresetOriginalState {
+	provider?: string;
+	model?: string;
+	thinkingLevel: PresetThinkingLevel;
+	tools: string[];
+}
+
+export interface PresetSessionState {
+	name: string;
+	customTools: boolean;
+	appliedTools?: string[];
+	originalState: PresetOriginalState;
+}
+
 export interface SessionResourceState {
-	version: 1;
+	version: 2;
 	tools?: string[];
 	enabledSkills: string[];
 	disabledSkills: string[];
 	enabledContexts: string[];
 	disabledContexts: string[];
+	preset?: PresetSessionState;
 }
 
 export interface ToolRecord {
@@ -89,7 +113,7 @@ export const DEFAULT_RESOURCE_SETTINGS: ResourceSettings = {
 };
 
 export const DEFAULT_SESSION_STATE: SessionResourceState = {
-	version: 1,
+	version: 2,
 	enabledSkills: [],
 	disabledSkills: [],
 	enabledContexts: [],
