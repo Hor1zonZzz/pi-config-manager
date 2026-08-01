@@ -255,6 +255,19 @@ npm run check
 pi --no-extensions -e ./src/index.ts
 ```
 
+### 自动发布
+
+发布稳定版 GitHub Release 时，`.github/workflows/publish.yml` 会自动把对应版本发布到 npm。工作流会检出 Release tag，验证该 tag 与 `v<package.json version>` 完全一致，运行完整检查，然后通过 npm Trusted Publishing 发布。Prerelease 会被跳过。
+
+首次自动发布前，需要在 npmjs.com 的包设置中打开 **Settings → Trusted Publisher → GitHub Actions**，并填写：
+
+- Organization or user：`Hor1zonZzz`
+- Repository：`pi-config-manager`
+- Workflow filename：`publish.yml`
+- Allowed action：`npm publish`
+
+之后更新 `package.json` 和 `package-lock.json`、整理 `CHANGELOG.md`、提交并推送，再创建匹配的 tag（例如 `v0.1.1`）和对应 GitHub Release。该工作流使用 OIDC，不需要保存长期 `NPM_TOKEN` Secret。npm 配置和工作流文件名区分大小写。
+
 ## 许可证
 
 [MIT](LICENSE)

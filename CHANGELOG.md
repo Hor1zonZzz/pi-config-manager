@@ -6,8 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-01
+
 ### Added
 
+- Added an npm trusted-publishing workflow that publishes stable GitHub Releases after validating the release tag and running the full check suite.
 - Integrated named presets for model, thinking level, tools, skills, and system-prompt instructions.
 - Added `/preset`, `--preset`, `Ctrl+Shift+U` cycling, the preset selector, and the editor-border preset label.
 - Bundled the `preset-settings` skill with the package.
@@ -37,5 +40,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Optional preset and runtime policy-layer integration events.
 - Behavior-contract test suite.
 
-[Unreleased]: https://github.com/Hor1zonZzz/pi-config-manager/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Hor1zonZzz/pi-config-manager/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Hor1zonZzz/pi-config-manager/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Hor1zonZzz/pi-config-manager/releases/tag/v0.1.0

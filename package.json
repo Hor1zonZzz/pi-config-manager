@@ -1,6 +1,6 @@
 {
   "name": "pi-config-manager",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Manage Pi presets, tools, skills, context files, and extensions from one package.",
   "type": "module",
   "license": "MIT",

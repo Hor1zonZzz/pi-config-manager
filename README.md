@@ -255,6 +255,19 @@ Run the local extension directly:
 pi --no-extensions -e ./src/index.ts
 ```
 
+### Publishing releases
+
+Stable GitHub Releases automatically publish the matching package version to npm through `.github/workflows/publish.yml`. The workflow checks out the release tag, verifies that `v<package.json version>` exactly matches the tag, runs the full check suite, and publishes with npm trusted publishing. Prereleases are intentionally skipped.
+
+Before the first automated publish, configure the package on npmjs.com under **Settings → Trusted Publisher → GitHub Actions**:
+
+- Organization or user: `Hor1zonZzz`
+- Repository: `pi-config-manager`
+- Workflow filename: `publish.yml`
+- Allowed action: `npm publish`
+
+Then update `package.json` and `package-lock.json`, finalize `CHANGELOG.md`, commit and push, create the matching tag (for example `v0.1.1`), and publish a GitHub Release for that tag. The workflow uses OIDC, so no long-lived `NPM_TOKEN` secret is required. The npm configuration and workflow filename are case-sensitive.
+
 ## License
 
 [MIT](LICENSE)
