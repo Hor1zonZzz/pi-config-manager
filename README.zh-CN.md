@@ -10,7 +10,7 @@ Pi Config Manager 是 [Pi Coding Agent](https://github.com/earendil-works/pi) �
 
 - 在一个界面中管理 **Tools、Skills、Context Files 和 Extensions**
 - 可搜索、全键盘操作的浮层，并保留当前对话作为背景
-- 持久化的 **Default** 设置与跟随会话分支的 **Session** 覆盖
+- 持久化的 **Global defaults** 与跟随会话分支的 **Current session** 覆盖
 - Context Monitor 可查看所选资源对模型可见提示词的贡献
 - 编辑器上方显示紧凑的资源状态 HUD
 - 根据资源来源，通过 Pi 公开设置 API 保存扩展开关
@@ -57,7 +57,7 @@ pi -e npm:pi-config-manager
 2. 按 `Tab` 在资源页签之间切换。
 3. 直接输入文字过滤当前列表。
 4. 按 `Space` 或 `Enter` 切换所选资源。
-5. 按 `G` 切换 Default 与 Session 作用域。
+5. 按 `G` 在 Global defaults 与 Current session 之间切换编辑目标。
 6. 在 Extensions 页按 `S` 保存暂存变更并重新加载 Pi。
 
 ### 键盘操作
@@ -69,7 +69,7 @@ pi -e npm:pi-config-manager
 | `↑` / `↓` | 移动选择，或滚动已聚焦的 Monitor |
 | `←` / `→` | 聚焦资源列表或 Context Monitor |
 | `Space` / `Enter` | 切换所选资源 |
-| `G` | 切换 Default/Session 作用域 |
+| `G` | 切换 Global defaults/Current session 编辑目标 |
 | `S` | 保存暂存的扩展变更并重新加载 Pi |
 | `Esc` | 关闭管理器 |
 
@@ -95,24 +95,26 @@ pi -e npm:pi-config-manager
 /contexts global enable|disable <absolute-path>
 ```
 
-## Default 与 Session 作用域
+## 编辑目标
 
-| 作用域 | 持久化方式 | 适用场景 |
+Preset 选择与修改持久化由同一个策略系统管理，但仍是不同的策略层。管理器只展示一份最终有效状态，按 `G` 可以选择修改记录到哪里：
+
+| 编辑目标 | 持久化方式 | 适用场景 |
 | --- | --- | --- |
-| **Default** | 将全局选择写入 `~/.pi/agent/resource-settings.json`，新会话会继承 | 日常使用的工具、技能和上下文配置 |
-| **Session** | 将覆盖项存储在当前会话分支中 | 针对单个任务或对话分支的临时调整 |
+| **Global defaults** | 将全局选择写入 `~/.pi/agent/resource-settings.json`，新会话会继承 | 日常使用的工具、技能和上下文配置 |
+| **Current session** | 将覆盖项存储在当前会话分支中 | 临时调整 Base 或当前命名 Preset |
 
-没有激活 Preset 时，Config Manager 默认以 **Default** 作用域打开。激活命名 Preset 后，它会默认以 **Session** 作用域打开。你可以随时按 `G` 切换。
+没有激活 Preset 时，Config Manager 初始选择 **Global defaults**；激活命名 Preset 后，初始选择 **Current session**。无论当前编辑目标是什么，最终状态始终组合 Base 策略、当前 Preset、Session 覆盖和运行时约束。
 
-受信任的项目可以在 `.pi/resource-settings.json` 中加入项目专属默认值。可视化界面的 Default 作用域只编辑全局默认值；项目文件继续由项目单独维护和纳入版本控制。
+受信任的项目可以在 `.pi/resource-settings.json` 中加入项目专属默认值。可视化界面的 Global defaults 目标只编辑全局默认值；项目文件继续由项目单独维护和纳入版本控制。
 
-扩展开关不受 Default/Session 作用域影响。它们会先在界面中暂存，按 `S` 并确认重新加载后，再根据资源来源写入对应的全局或项目 Pi 设置。
+扩展开关不受资源编辑目标影响。它们会先在界面中暂存，按 `S` 并确认重新加载后，再根据资源来源写入对应的全局或项目 Pi 设置。
 
 ## 各类资源的行为
 
 ### Tools
 
-工具变更通过 `pi.setActiveTools()` 立即生效。Config Manager 使用 Pi 已发现的工具清单，并在能够观察到时保留其他扩展动态加入的工具。
+工具变更通过 `pi.setActiveTools()` 立即生效。Config Manager 使用 Pi 已发现的工具清单，并在能够观察到时保留其他扩展动态加入的工具。Global defaults 同时保存显式启用和禁用，因此 Pi 注册但初始未激活的工具也可以被持久启用。
 
 ### Skills
 
@@ -160,6 +162,7 @@ pi -e npm:pi-config-manager
 ```json
 {
   "version": 1,
+  "enabledTools": ["ast_grep_search"],
   "disabledTools": ["write"],
   "disabledSkills": ["deploy"],
   "disabledContexts": ["/absolute/path/to/AGENTS.md"]
@@ -205,6 +208,10 @@ Config Manager 从以下位置加载命名 Preset：
 ```
 
 目前运行时约束只作用于工具，主要供只读模式、沙箱模式等扩展集成使用。
+
+### 策略架构
+
+Config Manager 只有一个扩展入口和一个 `PolicyManager`。Base 设置、第一方 Preset Feature、Session 覆盖和外部运行时策略层都向该核心提交策略，只有核心负责计算并应用最终资源状态。因此 Preset 使用包内类型化 Profile Policy 接口，而不是兼容事件桥；外部插件无法共享包内 controller，所以继续使用下方具备生命周期防护的运行时策略层事件 API。
 
 ## 扩展集成事件
 

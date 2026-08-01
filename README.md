@@ -10,7 +10,7 @@ Pi Config Manager is a resource-policy extension for [Pi Coding Agent](https://g
 
 - One UI for **Tools**, **Skills**, **Context Files**, and **Extensions**
 - Searchable, keyboard-driven overlay that keeps the current conversation visible
-- Persistent **Default** settings and branch-aware **Session** overrides
+- Persistent **Global defaults** and branch-aware **Current session** overrides
 - Context Monitor showing how the selected resource contributes to the model-visible prompt
 - A compact resource HUD above the editor
 - Source-aware extension toggles saved through Pi's public settings APIs
@@ -57,7 +57,7 @@ Start Pi, then run:
 2. Press `Tab` to move between resource tabs.
 3. Type to filter the current list.
 4. Press `Space` or `Enter` to toggle the selected resource.
-5. Press `G` to switch between Default and Session scope.
+5. Press `G` to switch the edit target between Global defaults and Current session.
 6. In Extensions, press `S` to save staged changes and reload Pi.
 
 ### Keyboard controls
@@ -69,7 +69,7 @@ Start Pi, then run:
 | `↑` / `↓` | Move through resources, or scroll the focused monitor |
 | `←` / `→` | Focus the resource list or Context Monitor |
 | `Space` / `Enter` | Toggle the selected resource |
-| `G` | Switch Default/Session scope |
+| `G` | Switch Global defaults/Current session edit target |
 | `S` | Save staged extension changes and reload Pi |
 | `Esc` | Close the manager |
 
@@ -95,24 +95,26 @@ Global defaults can also be changed directly:
 /contexts global enable|disable <absolute-path>
 ```
 
-## Default and Session scopes
+## Edit targets
 
-| Scope | Persistence | Best for |
+Preset selection and edit persistence are managed together but remain distinct policy layers. The manager displays one effective resource state and lets `G` choose where a change is recorded:
+
+| Edit target | Persistence | Best for |
 | --- | --- | --- |
-| **Default** | Writes global choices to `~/.pi/agent/resource-settings.json`; new sessions inherit them | Your normal tool, skill, and context setup |
-| **Session** | Stores overrides in the current session branch | Temporary changes for one task or conversation branch |
+| **Global defaults** | Writes global choices to `~/.pi/agent/resource-settings.json`; new sessions inherit them | Your normal tool, skill, and context setup |
+| **Current session** | Stores overrides in the current session branch | Temporary changes to Base or the active named preset |
 
-With no active preset, Config Manager opens in **Default** scope. With a named preset active, it opens in **Session** scope. Press `G` at any time to switch.
+With no active preset, Config Manager initially targets **Global defaults**. With a named preset active, it initially targets **Current session**. The effective state always includes Base policy, the active preset, session overrides, and runtime constraints regardless of the selected edit target.
 
-Trusted projects may add repository-specific defaults in `.pi/resource-settings.json`. The visual Default scope edits global defaults; project files stay source-controlled and are edited separately.
+Trusted projects may add repository-specific defaults in `.pi/resource-settings.json`. The visual Global defaults target edits only global defaults; project files stay source-controlled and are edited separately.
 
-Extension changes are independent of Default/Session scope. They are staged in the UI and then written to the appropriate global or project Pi settings when you press `S` and confirm reload.
+Extension changes are independent of the resource edit target. They are staged in the UI and then written to the appropriate global or project Pi settings when you press `S` and confirm reload.
 
 ## Resource behavior
 
 ### Tools
 
-Tool changes apply immediately through `pi.setActiveTools()`. Config Manager uses Pi's discovered tool inventory and preserves tools added by other extensions when it can observe them.
+Tool changes apply immediately through `pi.setActiveTools()`. Config Manager uses Pi's discovered tool inventory and preserves tools added by other extensions when it can observe them. Global defaults store both explicit enables and disables, so tools that Pi registered as initially inactive can still be enabled persistently.
 
 ### Skills
 
@@ -160,6 +162,7 @@ Schema:
 ```json
 {
   "version": 1,
+  "enabledTools": ["ast_grep_search"],
   "disabledTools": ["write"],
   "disabledSkills": ["deploy"],
   "disabledContexts": ["/absolute/path/to/AGENTS.md"]
@@ -205,6 +208,10 @@ runtime constraint > session override > preset > project/global default > Pi def
 ```
 
 Runtime constraints currently apply to tools. They are intended for integrations such as read-only or sandbox modes.
+
+### Policy architecture
+
+Config Manager has one extension entrypoint and one `PolicyManager`. Base settings, the first-party Preset feature, session overrides, and external runtime layers all submit policy to that core; only the core resolves and applies the effective resource state. Presets therefore use an internal typed profile-policy interface rather than a compatibility event bridge. External plugins retain the defensive runtime-layer event API below because they cannot share the package's internal controller.
 
 ## Integration events
 

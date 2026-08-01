@@ -12,6 +12,7 @@ export type ResourceTab =
 
 export interface ResourceSettings {
 	version: 1;
+	enabledTools: string[];
 	disabledTools: string[];
 	disabledSkills: string[];
 	disabledContexts: string[];
@@ -107,6 +108,7 @@ export interface ExtensionChange {
 
 export const DEFAULT_RESOURCE_SETTINGS: ResourceSettings = {
 	version: 1,
+	enabledTools: [],
 	disabledTools: [],
 	disabledSkills: [],
 	disabledContexts: [],

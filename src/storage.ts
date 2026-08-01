@@ -20,7 +20,7 @@ function strings(value: unknown): string[] {
 				new Set(
 					value.filter((item): item is string => typeof item === "string"),
 				),
-			).sort()
+			).sort((a, b) => a.localeCompare(b))
 		: [];
 }
 
@@ -31,6 +31,7 @@ export function normalizeResourceSettings(value: unknown): ResourceSettings {
 			: {};
 	return {
 		version: 1,
+		enabledTools: strings(data.enabledTools),
 		disabledTools: strings(data.disabledTools),
 		disabledSkills: strings(data.disabledSkills),
 		disabledContexts: strings(data.disabledContexts),

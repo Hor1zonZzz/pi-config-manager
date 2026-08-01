@@ -14,6 +14,7 @@ for file in \
   package/README.md \
   package/THIRD_PARTY_NOTICES.md \
   package/src/index.ts \
+  package/src/policy-manager.ts \
   package/src/preset-editor.ts \
   package/src/presets.ts \
   package/skills/preset-settings/SKILL.md; do

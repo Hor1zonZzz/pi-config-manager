@@ -354,6 +354,7 @@ describe("storage compatibility", () => {
 			}),
 		).toEqual({
 			version: 1,
+			enabledTools: [],
 			disabledTools: ["read", "write"],
 			disabledSkills: ["alpha", "zeta"],
 			disabledContexts: [],
@@ -921,7 +922,7 @@ describe("manager behavior contract", () => {
 		}
 	});
 
-	test("opens default scope and persists tool toggles for new sessions", async () => {
+	test("opens the global defaults target and persists tool toggles for new sessions", async () => {
 		const harness = createHarness({
 			tools: [
 				{
@@ -977,7 +978,7 @@ describe("manager behavior contract", () => {
 				"Pi Config Manager · Context Monitor",
 			);
 			expect(renderedText).toContain("[Tools]");
-			expect(renderedText).toContain("Scope: Default");
+			expect(renderedText).toContain("Target: Global defaults");
 			expect(renderedText).toContain("System prompt Available tools entry:");
 			expect(renderedText).toContain("- read: Read files safely");
 			expect(renderedText).toContain("System prompt guidelines:");
@@ -985,6 +986,7 @@ describe("manager behavior contract", () => {
 			expect(harness.getActiveTools()).toEqual([]);
 			expect(readResourceSettings()).toEqual({
 				version: 1,
+				enabledTools: [],
 				disabledTools: ["read"],
 				disabledSkills: [],
 				disabledContexts: [],
@@ -1010,7 +1012,63 @@ describe("manager behavior contract", () => {
 		}
 	});
 
-	test("switches to session scope without changing global defaults", async () => {
+	test("persistently enables a tool that Pi initially registered as inactive", async () => {
+		const harness = createHarness({
+			tools: [
+				{ name: "ast_grep_search", description: "Search syntax trees" },
+				{ name: "read", description: "Read files" },
+			],
+			activeTools: ["read"],
+		});
+		await harness.start();
+		try {
+			harness.setCustomImplementation(async (factory) => {
+				let result: "close" | "save" = "close";
+				const component = await factory(
+					{ requestRender() {} },
+					createTheme(),
+					createKeybindings(),
+					(value: "close" | "save") => {
+						result = value;
+					},
+				);
+				component.handleInput(" ");
+				component.handleInput("escape");
+				return result;
+			});
+
+			await harness.commands.get("tools").handler("", harness.ctx);
+			expect(harness.getActiveTools().sort()).toEqual([
+				"ast_grep_search",
+				"read",
+			]);
+			expect(readResourceSettings()).toEqual({
+				version: 1,
+				enabledTools: ["ast_grep_search"],
+				disabledTools: [],
+				disabledSkills: [],
+				disabledContexts: [],
+			});
+
+			const nextSession = createHarness({
+				tools: [{ name: "ast_grep_search" }, { name: "read" }],
+				activeTools: ["read"],
+			});
+			await nextSession.start();
+			try {
+				expect(nextSession.getActiveTools().sort()).toEqual([
+					"ast_grep_search",
+					"read",
+				]);
+			} finally {
+				await nextSession.shutdown();
+			}
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("switches to the current session target without changing global defaults", async () => {
 		const harness = createHarness({
 			tools: [{ name: "read", description: "Read files" }],
 			activeTools: ["read"],
@@ -1038,8 +1096,8 @@ describe("manager behavior contract", () => {
 			});
 
 			await harness.commands.get("tools").handler("", harness.ctx);
-			expect(defaultView).toContain("Scope: Default");
-			expect(sessionView).toContain("Scope: Session");
+			expect(defaultView).toContain("Target: Global defaults");
+			expect(sessionView).toContain("Target: Current session");
 			expect(existsSync(join(agentDir, "resource-settings.json"))).toBe(false);
 			expect(
 				harness.entries.some(
@@ -1054,7 +1112,7 @@ describe("manager behavior contract", () => {
 		}
 	});
 
-	test("persists skill toggles from default scope", async () => {
+	test("persists skill toggles from the global defaults target", async () => {
 		const harness = createHarness({
 			tools: [{ name: "read", description: "Read files" }],
 			activeTools: ["read"],
@@ -1086,9 +1144,10 @@ describe("manager behavior contract", () => {
 			});
 
 			await harness.commands.get("skills").handler("", harness.ctx);
-			expect(rendered).toContain("Scope: Default");
+			expect(rendered).toContain("Target: Global defaults");
 			expect(readResourceSettings()).toEqual({
 				version: 1,
+				enabledTools: [],
 				disabledTools: [],
 				disabledSkills: ["alpha"],
 				disabledContexts: [],

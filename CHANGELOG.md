@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-01
+
+### Added
+
+- Added persistent `enabledTools` policy so Global defaults can activate tools that Pi registered as initially inactive.
+
+### Changed
+
+- Refactored resource resolution into a reusable `PolicyManager`; the first-party Preset feature now submits a generic profile policy through the same core used by session overrides and runtime layers.
+- Renamed the user-visible Default/Session scope selector to the less ambiguous Global defaults/Current session edit target.
+
 ### Fixed
 
 - Runtime tool-layer events received before Config Manager finishes session initialization are now stored and applied after the default tool snapshot is captured, preventing extension load order from clearing active tools.
@@ -44,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Optional preset and runtime policy-layer integration events.
 - Behavior-contract test suite.
 
-[Unreleased]: https://github.com/Hor1zonZzz/pi-config-manager/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Hor1zonZzz/pi-config-manager/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Hor1zonZzz/pi-config-manager/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Hor1zonZzz/pi-config-manager/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Hor1zonZzz/pi-config-manager/releases/tag/v0.1.0
