@@ -224,7 +224,7 @@ pi.events.emit("config-manager:layer-clear", {
 });
 ```
 
-每个策略层以 ID 区分并参与组合。每层中的必需工具会在禁用工具之后加入，而且只能激活 Pi 已发现的工具。
+每个策略层以 ID 区分并参与组合。每层中的必需工具会在禁用工具之后加入，而且只能激活 Pi 已发现的工具。调用方可以在任意时刻设置或清除策略层，包括 Config Manager 的 `session_start` 之前；提前到达的事件会先保存，等默认工具清单初始化后才应用。
 
 如需监听资源数量，可以订阅 `config-manager:state-changed`。发送 `config-manager:request-snapshot` 可以请求管理器立即发布一次快照。
 

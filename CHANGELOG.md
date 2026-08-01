@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Runtime tool-layer events received before Config Manager finishes session initialization are now stored and applied after the default tool snapshot is captured, preventing extension load order from clearing active tools.
+
 ## [0.1.1] - 2026-08-01
 
 ### Added

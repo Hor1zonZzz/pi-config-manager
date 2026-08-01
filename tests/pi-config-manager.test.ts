@@ -514,6 +514,93 @@ describe("manager behavior contract", () => {
 		}
 	});
 
+	test("defers an early layer clear until the tool policy is initialized", async () => {
+		const harness = createHarness({
+			tools: [
+				{ name: "read" },
+				{ name: "bash" },
+				{ name: "edit" },
+				{ name: "write" },
+			],
+			activeTools: ["read", "bash", "edit", "write"],
+		});
+		harness.events.emit("config-manager:layer-clear", { id: "plan-mode" });
+		expect(harness.getActiveTools()).toEqual([
+			"read",
+			"bash",
+			"edit",
+			"write",
+		]);
+		await harness.start();
+		try {
+			expect(harness.getActiveTools()).toEqual([
+				"read",
+				"bash",
+				"edit",
+				"write",
+			]);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("stores an early layer set and applies it after initialization", async () => {
+		const harness = createHarness({
+			tools: [
+				{ name: "read" },
+				{ name: "bash" },
+				{ name: "edit" },
+				{ name: "write" },
+			],
+			activeTools: ["read", "bash", "edit", "write"],
+		});
+		harness.events.emit("config-manager:layer-set", {
+			id: "plan-mode",
+			disableTools: ["edit", "write"],
+			requireTools: ["read"],
+		});
+		expect(harness.getActiveTools()).toEqual([
+			"read",
+			"bash",
+			"edit",
+			"write",
+		]);
+		await harness.start();
+		try {
+			expect(harness.getActiveTools()).toEqual(["read", "bash"]);
+			harness.events.emit("config-manager:layer-clear", { id: "plan-mode" });
+			expect(harness.getActiveTools()).toEqual([
+				"read",
+				"bash",
+				"edit",
+				"write",
+			]);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("uses the final early event for an idempotent runtime layer", async () => {
+		const harness = createHarness({
+			tools: [{ name: "read" }, { name: "write" }],
+			activeTools: ["read", "write"],
+		});
+		const layer = {
+			id: "read-only",
+			disableTools: ["write"],
+			requireTools: ["read"],
+		};
+		harness.events.emit("config-manager:layer-set", layer);
+		harness.events.emit("config-manager:layer-set", layer);
+		harness.events.emit("config-manager:layer-clear", { id: "read-only" });
+		harness.events.emit("config-manager:layer-clear", { id: "read-only" });
+		await harness.start();
+		expect(harness.getActiveTools()).toEqual(["read", "write"]);
+		await harness.shutdown();
+		harness.events.emit("config-manager:layer-set", layer);
+		expect(harness.getActiveTools()).toEqual(["read", "write"]);
+	});
+
 	test("preserves session, runtime-layer, and external-tool precedence", async () => {
 		const harness = createHarness({
 			tools: [

@@ -97,6 +97,7 @@ interface ViewItem {
 
 type ResourceScope = "session" | "default";
 type ToggleableResourceTab = "tools" | "skills" | "contexts";
+type PolicyPhase = "collecting" | "initializing" | "ready" | "stopped";
 
 function isResourceEnabled(
 	snapshot: ManagerSnapshot,
@@ -110,6 +111,13 @@ function isResourceEnabled(
 
 function unique(values: Iterable<string>): string[] {
 	return Array.from(new Set(values)).sort();
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+	return (
+		left.length === right.length &&
+		left.every((value, index) => value === right[index])
+	);
 }
 
 function formatContextSection(files: ContextRecord[]): string {
@@ -758,6 +766,9 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	let lastAppliedTools = new Set<string>();
 	let hasAppliedTools = false;
 	const runtimeLayers = new Map<string, RuntimeLayer>();
+	let policyPhase: PolicyPhase = "collecting";
+	let runtimePolicyDirty = false;
+	let toolsInventoryUpdating = false;
 	let settleTimer: ReturnType<typeof setTimeout> | undefined;
 	let requestHudRender: (() => void) | undefined;
 	const promptWarnings = new Set<"skills" | "contexts">();
@@ -897,26 +908,38 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	}
 
 	function updateToolsInventory(): void {
-		if (hasAppliedTools) {
-			for (const name of pi.getActiveTools()) {
-				if (!lastAppliedTools.has(name)) externalTools.add(name);
-			}
+		if (toolsInventoryUpdating) {
+			runtimePolicyDirty = true;
+			return;
 		}
-		snapshot = {
-			...snapshot,
-			tools: pi
-				.getAllTools()
-				.map((tool) => ({
-					name: tool.name,
-					description: tool.description,
-					promptSnippet: snapshot.toolSnippets[tool.name],
-					parameters: tool.parameters,
-					promptGuidelines: tool.promptGuidelines,
-					sourceInfo: tool.sourceInfo,
-				}))
-				.sort((a, b) => a.name.localeCompare(b.name)),
-		};
-		reconcileTools();
+		toolsInventoryUpdating = true;
+		try {
+			do {
+				runtimePolicyDirty = false;
+				if (hasAppliedTools) {
+					for (const name of pi.getActiveTools()) {
+						if (!lastAppliedTools.has(name)) externalTools.add(name);
+					}
+				}
+				snapshot = {
+					...snapshot,
+					tools: pi
+						.getAllTools()
+						.map((tool) => ({
+							name: tool.name,
+							description: tool.description,
+							promptSnippet: snapshot.toolSnippets[tool.name],
+							parameters: tool.parameters,
+							promptGuidelines: tool.promptGuidelines,
+							sourceInfo: tool.sourceInfo,
+						}))
+						.sort((a, b) => a.name.localeCompare(b.name)),
+				};
+				reconcileTools();
+			} while (runtimePolicyDirty);
+		} finally {
+			toolsInventoryUpdating = false;
+		}
 	}
 
 	function getPresetLabel(): string {
@@ -1560,6 +1583,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	});
 
 	pi.events.on("config-manager:layer-set", (event) => {
+		if (policyPhase === "stopped") return;
 		const data = event as {
 			id?: unknown;
 			disableTools?: unknown;
@@ -1574,18 +1598,28 @@ export default function piConfigManager(pi: ExtensionAPI) {
 						),
 					)
 				: [];
-		runtimeLayers.set(data.id, {
+		const layer: RuntimeLayer = {
 			id: data.id,
 			disableTools: toolNames(data.disableTools),
 			requireTools: toolNames(data.requireTools),
-		});
-		reconcileTools();
+		};
+		const current = runtimeLayers.get(data.id);
+		if (
+			current &&
+			sameStrings(current.disableTools, layer.disableTools) &&
+			sameStrings(current.requireTools, layer.requireTools)
+		)
+			return;
+		runtimeLayers.set(data.id, layer);
+		runtimePolicyDirty = true;
+		if (policyPhase === "ready") updateToolsInventory();
 	});
 	pi.events.on("config-manager:layer-clear", (event) => {
+		if (policyPhase === "stopped") return;
 		const id = (event as { id?: unknown }).id;
-		if (typeof id !== "string") return;
-		runtimeLayers.delete(id);
-		reconcileTools();
+		if (typeof id !== "string" || !runtimeLayers.delete(id)) return;
+		runtimePolicyDirty = true;
+		if (policyPhase === "ready") updateToolsInventory();
 	});
 	pi.events.on("config-manager:request-snapshot", () => {
 		pi.events.emit("config-manager:state-changed", publicSnapshot());
@@ -1679,6 +1713,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		policyPhase = "initializing";
 		promptWarnings.clear();
 		defaultTools = new Set(pi.getActiveTools());
 		externalTools = new Set();
@@ -1734,9 +1769,12 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			}
 		}
 		updatePresetStatus(ctx);
+		updateToolsInventory();
+		policyPhase = "ready";
 		scheduleSettledRefresh(ctx);
 	});
 	pi.on("session_tree", (_event, ctx) => {
+		policyPhase = "initializing";
 		externalTools = new Set();
 		presets = loadPresets(ctx.cwd, ctx.isProjectTrusted());
 		restoreSession(ctx);
@@ -1749,8 +1787,11 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			enabledContexts: resolveEnabledContexts(snapshot.contexts),
 		};
 		updatePresetStatus(ctx);
+		updateToolsInventory();
+		policyPhase = "ready";
 	});
 	pi.on("session_shutdown", (_event, ctx) => {
+		policyPhase = "stopped";
 		if (settleTimer) clearTimeout(settleTimer);
 		settleTimer = undefined;
 		ctx.ui.setWidget("pi-config-manager", undefined);

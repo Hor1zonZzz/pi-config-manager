@@ -224,7 +224,7 @@ pi.events.emit("config-manager:layer-clear", {
 });
 ```
 
-Layers compose by ID. Required tools are added after disabled tools for each layer, and only discovered tools can be activated.
+Layers compose by ID. Required tools are added after disabled tools for each layer, and only discovered tools can be activated. Callers may set or clear layers at any time, including before Config Manager's `session_start`; early events are stored and applied only after the default tool inventory is initialized.
 
 To observe resource counts, listen for `config-manager:state-changed`. Emit `config-manager:request-snapshot` to request an immediate snapshot.
 
