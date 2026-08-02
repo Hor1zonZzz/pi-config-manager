@@ -336,6 +336,16 @@ function readResourceSettings(): any {
 	);
 }
 
+function writeProjectResourceSettings(value: unknown) {
+	const configDir = join(cwd, ".pi");
+	mkdirSync(configDir, { recursive: true });
+	writeFileSync(
+		join(configDir, "resource-settings.json"),
+		`${JSON.stringify(value, null, 2)}\n`,
+		"utf8",
+	);
+}
+
 function writePresets(value: unknown, root = agentDir) {
 	mkdirSync(root, { recursive: true });
 	writeFileSync(
@@ -600,6 +610,161 @@ describe("manager behavior contract", () => {
 		await harness.shutdown();
 		harness.events.emit("config-manager:layer-set", layer);
 		expect(harness.getActiveTools()).toEqual(["read", "write"]);
+	});
+
+	test("shows effective runtime tool state and locks constrained toggles", async () => {
+		const harness = createHarness({
+			tools: [
+				{ name: "read", description: "Read files" },
+				{ name: "edit", description: "Edit files" },
+				{ name: "grep", description: "Search files" },
+			],
+			activeTools: ["read", "edit"],
+		});
+		harness.events.emit("config-manager:layer-set", {
+			id: "plan-mode",
+			disableTools: ["edit"],
+			requireTools: ["grep"],
+		});
+		await harness.start();
+		try {
+			expect(new Set(harness.getActiveTools())).toEqual(
+				new Set(["read", "grep"]),
+			);
+
+			let rendered = "";
+			let renderedNarrow = "";
+			harness.setCustomImplementation(async (factory) => {
+				let result: "close" | "save" = "close";
+				const component = await factory(
+					{ requestRender() {} },
+					createTheme(),
+					createKeybindings(),
+					(value: "close" | "save") => {
+						result = value;
+					},
+				);
+				rendered = component.render(180).join("\n");
+				renderedNarrow = component.render(72).join("\n");
+				component.handleInput(" ");
+				component.handleInput("down");
+				component.handleInput(" ");
+				component.handleInput("escape");
+				return result;
+			});
+
+			await harness.commands.get("tools").handler("", harness.ctx);
+			expect(rendered).toContain("View: Effective");
+			expect(rendered).toContain("Edit: Global");
+			expect(rendered).toContain("Constraints: plan-mode");
+			expect(rendered).toContain("🔒 edit  inactive · blocked by plan-mode");
+			expect(rendered).toContain("🔒 grep  active · required by plan-mode");
+			expect(renderedNarrow).toContain("View: Effective · Edit: Global");
+			expect(renderedNarrow).toContain("Constraints: plan-mode");
+			expect(renderedNarrow).toContain("🔒 edit");
+			expect(existsSync(join(agentDir, "resource-settings.json"))).toBe(false);
+			expect(
+				harness.notifications.some((notification) =>
+					notification.message.includes(
+						'Tool "edit" is blocked by runtime constraint "plan-mode"',
+					),
+				),
+			).toBe(true);
+			expect(
+				harness.notifications.some((notification) =>
+					notification.message.includes(
+						'Tool "grep" is required by runtime constraint "plan-mode"',
+					),
+				),
+			).toBe(true);
+			expect(new Set(harness.getActiveTools())).toEqual(
+				new Set(["read", "grep"]),
+			);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("locks project-disabled resources that the Global target cannot enable", async () => {
+		const contextPath = join(cwd, "AGENTS.md");
+		writeProjectResourceSettings({
+			version: 1,
+			enabledTools: [],
+			disabledTools: ["edit"],
+			disabledSkills: ["alpha"],
+			disabledContexts: [contextPath],
+		});
+		const harness = createHarness({
+			trusted: true,
+			tools: [{ name: "edit" }, { name: "read" }],
+			activeTools: ["edit", "read"],
+			skills: [
+				{
+					name: "alpha",
+					description: "Alpha skill",
+					path: "/skills/alpha/SKILL.md",
+				},
+			],
+			promptOptions: {
+				selectedTools: ["read"],
+				toolSnippets: {},
+				skills: [
+					{
+						name: "alpha",
+						description: "Alpha skill",
+						filePath: "/skills/alpha/SKILL.md",
+					},
+				],
+				contextFiles: [{ path: contextPath, content: "instructions" }],
+			},
+		});
+		await harness.start();
+		try {
+			const rendered: string[] = [];
+			harness.setCustomImplementation(async (factory) => {
+				let result: "close" | "save" = "close";
+				const component = await factory(
+					{ requestRender() {} },
+					createTheme(),
+					createKeybindings(),
+					(value: "close" | "save") => {
+						result = value;
+					},
+				);
+				rendered.push(component.render(180).join("\n"));
+				component.handleInput(" ");
+				component.handleInput("tab");
+				rendered.push(component.render(180).join("\n"));
+				component.handleInput(" ");
+				component.handleInput("tab");
+				rendered.push(component.render(180).join("\n"));
+				component.handleInput(" ");
+				component.handleInput("escape");
+				return result;
+			});
+
+			await harness.commands.get("tools").handler("", harness.ctx);
+			expect(harness.getActiveTools()).toEqual(["read"]);
+			expect(rendered[0]).toContain("Constraints: project settings");
+			expect(rendered[0]).toContain(
+				"🔒 edit  inactive · blocked by project settings",
+			);
+			expect(rendered[1]).toContain(
+				"🔒 alpha  disabled · blocked by project settings",
+			);
+			expect(rendered[2]).toContain(
+				"🔒 AGENTS.md  disabled · blocked by project settings",
+			);
+			expect(harness.notifications).toHaveLength(3);
+			expect(
+				harness.notifications.every((notification) =>
+					notification.message.includes("disabled by project settings"),
+				),
+			).toBe(true);
+			expect(existsSync(join(agentDir, "resource-settings.json"))).toBe(false);
+		} finally {
+			await harness.shutdown();
+		}
 	});
 
 	test("preserves preset session, runtime-layer, and external-tool precedence", async () => {
@@ -1033,7 +1198,8 @@ describe("manager behavior contract", () => {
 				"Pi Config Manager · Context Monitor",
 			);
 			expect(renderedText).toContain("[Tools]");
-			expect(renderedText).toContain("Target: Global");
+			expect(renderedText).toContain("View: Effective");
+			expect(renderedText).toContain("Edit: Global");
 			expect(renderedText).not.toContain("G target");
 			expect(renderedText).toContain("System prompt Available tools entry:");
 			expect(renderedText).toContain("- read: Read files safely");
@@ -1159,10 +1325,11 @@ describe("manager behavior contract", () => {
 			});
 
 			await harness.commands.get("tools").handler("", harness.ctx);
-			expect(rendered).toContain("Target: Session · focus");
+			expect(rendered).toContain("View: Effective");
+			expect(rendered).toContain("Edit: Session · focus");
 			expect(rendered).not.toContain("G target");
-			expect(extensionsRendered).toContain("Target: Pi settings");
-			expect(extensionsRendered).not.toContain("Target: Session");
+			expect(extensionsRendered).toContain("View/Edit: Pi settings");
+			expect(extensionsRendered).not.toContain("Edit: Session");
 			expect(existsSync(join(agentDir, "resource-settings.json"))).toBe(false);
 			expect(new Set(harness.getActiveTools())).toEqual(
 				new Set(["read", "bash"]),
@@ -1287,7 +1454,8 @@ describe("manager behavior contract", () => {
 			});
 
 			await harness.commands.get("skills").handler("", harness.ctx);
-			expect(rendered).toContain("Target: Global");
+			expect(rendered).toContain("View: Effective");
+			expect(rendered).toContain("Edit: Global");
 			expect(readResourceSettings()).toEqual({
 				version: 1,
 				enabledTools: [],

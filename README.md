@@ -9,6 +9,7 @@ Pi Config Manager is a resource-policy extension for [Pi Coding Agent](https://g
 ## Highlights
 
 - One UI for **Tools**, **Skills**, **Context Files**, and **Extensions**
+- Effective-state resource display showing what is currently available to the model
 - Searchable, keyboard-driven overlay that keeps the current conversation visible
 - Persistent **Global** resource settings, with presets isolated to the current session
 - Context Monitor showing how the selected resource contributes to the model-visible prompt
@@ -93,24 +94,30 @@ Global defaults can also be changed directly:
 /contexts global enable|disable <absolute-path>
 ```
 
-## Automatic edit target
+## Effective view and automatic edit target
 
-The visual manager chooses its target automatically; there is no manual target-switching key:
+The visual manager always displays the **Effective** resource state: the result after Pi defaults, Global/project settings, the active preset, Session overrides, external activation, and runtime constraints have been composed. This is the state available to the model on the next provider request.
 
-- With no active preset, the label is **Global**. The manager displays Global choices, and tool, skill, and context changes are written to `~/.pi/agent/resource-settings.json` for new sessions to inherit.
-- With a named preset active, the label is **Session · preset-name**. The manager displays the current effective preset/session state, and resource changes are stored only in the current session branch as overrides of that preset. They do not modify Global settings or `presets.json`.
+Editing remains automatic; there is no manual target-switching key:
+
+- With no active preset, the header shows **View: Effective · Edit: Global**. Tool, skill, and context changes are written to `~/.pi/agent/resource-settings.json` for new sessions to inherit.
+- With a named preset active, the header shows **View: Effective · Edit: Session · preset-name**. Resource changes are stored only in the current session branch as overrides of that preset. They do not modify Global settings or `presets.json`.
+
+Runtime constraints have the highest tool precedence. A constrained row is marked with a visible lock and its owning layer, for example `🔒 edit · blocked by plan-mode` or `🔒 grep · required by plan-mode`. Locked tools cannot be toggled from the manager; clear the owning runtime constraint first. This prevents an edit that cannot change the Effective state.
+
+A trusted project's `.pi/resource-settings.json` can also disable resources that the Global edit target cannot re-enable. These rows are marked `blocked by project settings` and locked while no preset is active; edit the project file directly. View, edit target, and constraints render on separate lines so they remain visible at the manager's minimum supported width.
 
 Activating or clearing a preset changes the current session's model, thinking level, resources, and instructions. Session resume and tree navigation restore both the active preset and its session overrides.
 
-Trusted projects may add repository-specific defaults in `.pi/resource-settings.json`. The visual Global target edits only Global settings; project files stay source-controlled and are edited separately.
+Trusted projects may add repository-specific defaults in `.pi/resource-settings.json`. The visual Global edit target changes only Global settings; project files stay source-controlled and are edited separately.
 
-Extension changes are independent of the automatic resource target. The Extensions tab therefore displays **Pi settings** instead of a Global or Session target. Changes are staged in the UI and then written to the appropriate global or project Pi settings when you press `S` and confirm reload.
+Extension changes are independent of the Effective resource view. The Extensions tab therefore displays **View/Edit: Pi settings**. Changes are staged in the UI and then written to the appropriate global or project Pi settings when you press `S` and confirm reload.
 
 ## Resource behavior
 
 ### Tools
 
-Tool changes apply immediately through `pi.setActiveTools()`. Config Manager uses Pi's discovered tool inventory and preserves tools added by other extensions when it can observe them. Global defaults store both explicit enables and disables, so tools that Pi registered as initially inactive can still be enabled persistently.
+Unconstrained tool changes apply immediately through `pi.setActiveTools()`. Config Manager uses Pi's discovered tool inventory and preserves tools added by other extensions when it can observe them. Global defaults store both explicit enables and disables, so tools that Pi registered as initially inactive can still be enabled persistently.
 
 ### Skills
 

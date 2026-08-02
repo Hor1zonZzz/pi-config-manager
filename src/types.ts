@@ -78,6 +78,11 @@ export interface RuntimeLayer {
 	requireTools: string[];
 }
 
+export interface RuntimeToolControl {
+	layerId: string;
+	action: "disable" | "require";
+}
+
 export interface EffectiveSystemPrompt {
 	content: string;
 	capturedAt: number;
@@ -93,10 +98,14 @@ export interface ManagerSnapshot {
 	toolSnippets: Record<string, string>;
 	effectiveSystemPrompt?: EffectiveSystemPrompt;
 	activeTools: Set<string>;
+	runtimeToolControls: Map<string, RuntimeToolControl>;
+	projectDisabledTools: Set<string>;
 	skills: SkillRecord[];
 	enabledSkills: Set<string>;
+	projectDisabledSkills: Set<string>;
 	contexts: ContextRecord[];
 	enabledContexts: Set<string>;
+	projectDisabledContexts: Set<string>;
 	extensions: ResolvedResource[];
 	presetName?: string;
 }

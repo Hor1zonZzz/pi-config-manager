@@ -91,6 +91,7 @@ interface ViewItem {
 	id: string;
 	label: string;
 	enabled?: boolean;
+	locked?: boolean;
 	state: string;
 	detail: string;
 	monitor?: MonitorPayload;
@@ -303,7 +304,7 @@ class ConfigManagerView implements Component, Focusable {
 		if (!selectedItem?.monitor) this.activePane = "resources";
 		const terminalRows = process.stdout.rows || 24;
 		const overlayBudget = Math.max(1, Math.floor(terminalRows * 0.9) - 2);
-		const paneHeight = Math.max(3, Math.min(16, overlayBudget - 4));
+		const paneHeight = Math.max(3, Math.min(16, overlayBudget - 6));
 		const tabs = TABS.map((tab) => {
 			const label = LABELS[tab];
 			return tab === this.tab
@@ -318,23 +319,51 @@ class ConfigManagerView implements Component, Focusable {
 			safeWidth,
 		);
 		if (safeWidth < 4) return [title];
-		const scopeLabel =
+		const targetLabel =
 			this.tab === "extensions"
-				? this.theme.fg("success", "Target: Pi settings")
+				? this.theme.fg("success", "View/Edit: Pi settings")
 				: snapshot.presetName
-					? this.theme.fg(
-							"warning",
-							`Target: Session · ${snapshot.presetName}`,
-						)
-					: this.theme.fg("success", "Target: Global");
+					? `${this.theme.fg("accent", "View: Effective")} · ${this.theme.fg("warning", `Edit: Session · ${snapshot.presetName}`)}`
+					: `${this.theme.fg("accent", "View: Effective")} · ${this.theme.fg("success", "Edit: Global")}`;
+		const constraintIds = Array.from(
+			new Set(
+				Array.from(snapshot.runtimeToolControls.values()).map(
+					(control) => control.layerId,
+				),
+			),
+		);
+		if (
+			!snapshot.presetName &&
+			(snapshot.projectDisabledTools.size > 0 ||
+				snapshot.projectDisabledSkills.size > 0 ||
+				snapshot.projectDisabledContexts.size > 0)
+		) {
+			constraintIds.push("project settings");
+		}
 		const tabLine = truncateToWidth(
-			`${snapshot.ready ? tabs : `${tabs}  ${this.theme.fg("warning", "loading resources…")}`}  ·  ${scopeLabel}`,
+			snapshot.ready
+				? tabs
+				: `${tabs}  ${this.theme.fg("warning", "loading resources…")}`,
 			safeWidth,
 		);
-		if (overlayBudget < 7) {
+		const targetLine = truncateToWidth(targetLabel, safeWidth);
+		const constraintLine = truncateToWidth(
+			this.tab === "extensions"
+				? this.theme.fg("dim", "Constraints: n/a")
+				: constraintIds.length > 0
+					? this.theme.fg(
+							"warning",
+							`Constraints: ${constraintIds.join(", ")}`,
+						)
+					: this.theme.fg("dim", "Constraints: none"),
+			safeWidth,
+		);
+		if (overlayBudget < 9) {
 			return [
 				title,
 				tabLine,
+				targetLine,
+				constraintLine,
 				truncateToWidth(`> ${this.search.getValue()}`, safeWidth, ""),
 				truncateToWidth(
 					this.theme.fg("warning", "Terminal too small for Context Monitor"),
@@ -346,6 +375,8 @@ class ConfigManagerView implements Component, Focusable {
 		const lines = [
 			title,
 			tabLine,
+			targetLine,
+			constraintLine,
 			truncateToWidth(`> ${this.search.getValue()}`, safeWidth, ""),
 		];
 
@@ -415,11 +446,12 @@ class ConfigManagerView implements Component, Focusable {
 					: item.enabled
 						? this.theme.fg("success", "● ")
 						: this.theme.fg("dim", "○ ");
+			const lock = item.locked ? this.theme.fg("warning", "🔒 ") : "";
 			const pending =
 				this.tab === "extensions" && this.stagedExtensions.has(item.id)
 					? this.theme.fg("warning", " staged")
 					: "";
-			return `${cursor}${check}${item.label}${this.theme.fg("dim", `  ${item.state}`)}${pending}`;
+			return `${cursor}${check}${lock}${item.label}${this.theme.fg("dim", `  ${item.state}`)}${pending}`;
 		});
 	}
 
@@ -554,12 +586,23 @@ class ConfigManagerView implements Component, Focusable {
 		if (this.tab === "tools")
 			return snapshot.tools.map((tool) => {
 				const active = snapshot.activeTools.has(tool.name);
+				const runtimeControl = snapshot.runtimeToolControls.get(tool.name);
+				const projectLocked =
+					!snapshot.presetName &&
+					!runtimeControl &&
+					snapshot.projectDisabledTools.has(tool.name);
+				const controlState = runtimeControl
+					? ` · ${runtimeControl.action === "disable" ? "blocked" : "required"} by ${runtimeControl.layerId}`
+					: projectLocked
+						? " · blocked by project settings"
+						: "";
 				const systemPromptVisible = active && !snapshot.customPromptActive;
 				return {
 					id: tool.name,
 					label: tool.name,
 					enabled: active,
-					state: active ? "active" : "inactive",
+					locked: Boolean(runtimeControl || projectLocked),
+					state: `${active ? "active" : "inactive"}${controlState}`,
 					detail: sourceDetail(tool.sourceInfo),
 					monitor: showCapturedSystemPrompt(
 						snapshot,
@@ -626,6 +669,9 @@ class ConfigManagerView implements Component, Focusable {
 		if (this.tab === "skills")
 			return snapshot.skills.map((skill) => {
 				const enabled = snapshot.enabledSkills.has(skill.name);
+				const projectLocked =
+					!snapshot.presetName &&
+					snapshot.projectDisabledSkills.has(skill.name);
 				const readAvailable = snapshot.activeTools.has("read");
 				const catalogVisible =
 					enabled && readAvailable && !skill.disableModelInvocation;
@@ -640,7 +686,8 @@ class ConfigManagerView implements Component, Focusable {
 					id: skill.name,
 					label: skill.name,
 					enabled,
-					state: enabled ? "enabled" : "disabled",
+					locked: projectLocked,
+					state: `${enabled ? "enabled" : "disabled"}${projectLocked ? " · blocked by project settings" : ""}`,
 					detail: skill.path,
 					monitor: showCapturedSystemPrompt(
 						snapshot,
@@ -674,11 +721,15 @@ class ConfigManagerView implements Component, Focusable {
 		if (this.tab === "contexts")
 			return snapshot.contexts.map((context) => {
 				const enabled = snapshot.enabledContexts.has(context.path);
+				const projectLocked =
+					!snapshot.presetName &&
+					snapshot.projectDisabledContexts.has(context.path);
 				return {
 					id: context.path,
 					label: basename(context.path),
 					enabled,
-					state: enabled ? "enabled" : "disabled",
+					locked: projectLocked,
+					state: `${enabled ? "enabled" : "disabled"}${projectLocked ? " · blocked by project settings" : ""}`,
 					detail: context.path,
 					monitor: showCapturedSystemPrompt(
 						snapshot,
@@ -766,10 +817,14 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		tools: [],
 		toolSnippets: {},
 		activeTools: new Set(),
+		runtimeToolControls: new Map(),
+		projectDisabledTools: new Set(),
 		skills: [],
 		enabledSkills: new Set(),
+		projectDisabledSkills: new Set(),
 		contexts: [],
 		enabledContexts: new Set(),
+		projectDisabledContexts: new Set(),
 		extensions: [],
 	};
 
@@ -798,22 +853,22 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		pi.setActiveTools(Array.from(policy.resolveEffectiveTools()));
 		lastAppliedTools = new Set(pi.getActiveTools());
 		hasAppliedTools = true;
-		snapshot = { ...snapshot, activeTools: new Set(lastAppliedTools) };
+		snapshot = {
+			...snapshot,
+			activeTools: new Set(lastAppliedTools),
+			runtimeToolControls: policy.resolveRuntimeToolControls(),
+		};
 		requestHudRender?.();
 		pi.events.emit("config-manager:state-changed", publicSnapshot());
 	}
 
-	function getGlobalSnapshot(): ManagerSnapshot {
+	function getManagerSnapshot(): ManagerSnapshot {
 		return {
 			...snapshot,
-			activeTools: policy.resolveGlobalDefaultTools(),
-			enabledSkills: policy.resolveGlobalDefaultSkills(snapshot.skills),
-			enabledContexts: policy.resolveGlobalDefaultContexts(snapshot.contexts),
+			projectDisabledTools: new Set(projectSettings.disabledTools),
+			projectDisabledSkills: new Set(projectSettings.disabledSkills),
+			projectDisabledContexts: new Set(projectSettings.disabledContexts),
 		};
-	}
-
-	function getManagerSnapshot(): ManagerSnapshot {
-		return activePresetName ? snapshot : getGlobalSnapshot();
 	}
 
 	function updateToolsInventory(): void {
@@ -1358,18 +1413,40 @@ export default function piConfigManager(pi: ExtensionAPI) {
 							}
 							const current = staged.get(id)?.enabled ?? resource.enabled;
 							staged.set(id, { resource, enabled: !current });
-						} else if (tab !== "overview" && activePresetName) {
-							toggleSessionResource(tab, id, ctx);
-							updatePromptInventory(ctx.getSystemPromptOptions());
-							updateToolsInventory();
 						} else if (tab !== "overview") {
-							const globalSnapshot = getGlobalSnapshot();
-							setGlobalResource(
-								tab,
-								id,
-								!isResourceEnabled(globalSnapshot, tab, id),
-								ctx,
-							);
+							const runtimeControl =
+								tab === "tools"
+									? snapshot.runtimeToolControls.get(id)
+									: undefined;
+							const projectLocked =
+								!activePresetName &&
+								(tab === "tools"
+									? projectSettings.disabledTools.includes(id)
+									: tab === "skills"
+										? projectSettings.disabledSkills.includes(id)
+										: projectSettings.disabledContexts.includes(id));
+							if (runtimeControl) {
+								ctx.ui.notify(
+									`Tool "${id}" is ${runtimeControl.action === "disable" ? "blocked" : "required"} by runtime constraint "${runtimeControl.layerId}". Clear that constraint before changing its effective state.`,
+									"warning",
+								);
+							} else if (projectLocked) {
+								ctx.ui.notify(
+									`Resource "${id}" is disabled by project settings. Edit .pi/resource-settings.json to change its effective state.`,
+									"warning",
+								);
+							} else if (activePresetName) {
+								toggleSessionResource(tab, id, ctx);
+								updatePromptInventory(ctx.getSystemPromptOptions());
+								updateToolsInventory();
+							} else {
+								setGlobalResource(
+									tab,
+									id,
+									!isResourceEnabled(snapshot, tab, id),
+									ctx,
+								);
+							}
 						}
 						tui.requestRender();
 					},

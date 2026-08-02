@@ -2,6 +2,7 @@ import type {
 	ContextRecord,
 	ResourceSettings,
 	RuntimeLayer,
+	RuntimeToolControl,
 	SessionResourceState,
 	SkillRecord,
 } from "./types";
@@ -228,6 +229,19 @@ export class PolicyManager {
 
 	clearRuntimeLayer(id: string): boolean {
 		return this.runtimeLayers.delete(id);
+	}
+
+	resolveRuntimeToolControls(): Map<string, RuntimeToolControl> {
+		const controls = new Map<string, RuntimeToolControl>();
+		for (const layer of this.runtimeLayers.values()) {
+			for (const name of layer.disableTools) {
+				controls.set(name, { layerId: layer.id, action: "disable" });
+			}
+			for (const name of layer.requireTools) {
+				controls.set(name, { layerId: layer.id, action: "require" });
+			}
+		}
+		return controls;
 	}
 
 	private effectiveDisabledTools(): Set<string> {

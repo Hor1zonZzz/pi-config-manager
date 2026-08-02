@@ -82,6 +82,14 @@ describe("PolicyManager", () => {
 			"bash",
 			"read",
 		]);
+		expect(policy.resolveRuntimeToolControls().get("edit")).toEqual({
+			layerId: "plan-mode",
+			action: "disable",
+		});
+		expect(policy.resolveRuntimeToolControls().get("bash")).toEqual({
+			layerId: "plan-mode",
+			action: "require",
+		});
 
 		policy.clearRuntimeLayer("plan-mode");
 		expect(Array.from(policy.resolveEffectiveTools()).sort()).toEqual([
@@ -99,7 +107,37 @@ describe("PolicyManager", () => {
 		};
 		expect(policy.setRuntimeLayer(layer)).toBe(true);
 		expect(policy.setRuntimeLayer(layer)).toBe(false);
+		policy.setRuntimeLayer({
+			id: "force-edit",
+			disableTools: [],
+			requireTools: ["edit"],
+		});
+		expect(policy.resolveRuntimeToolControls().get("edit")).toEqual({
+			layerId: "force-edit",
+			action: "require",
+		});
+		expect(policy.resolveEffectiveTools().has("edit")).toBe(true);
+		expect(policy.clearRuntimeLayer("force-edit")).toBe(true);
+		expect(policy.resolveRuntimeToolControls().get("edit")).toEqual({
+			layerId: "read-only",
+			action: "disable",
+		});
+		expect(policy.resolveEffectiveTools().has("edit")).toBe(false);
+
+		expect(
+			policy.setRuntimeLayer({
+				id: "read-only",
+				disableTools: ["edit"],
+				requireTools: ["edit"],
+			}),
+		).toBe(true);
+		expect(policy.resolveRuntimeToolControls().get("edit")).toEqual({
+			layerId: "read-only",
+			action: "require",
+		});
+		expect(policy.resolveEffectiveTools().has("edit")).toBe(true);
 		expect(policy.clearRuntimeLayer("missing")).toBe(false);
 		expect(policy.clearRuntimeLayer("read-only")).toBe(true);
+		expect(policy.resolveRuntimeToolControls().has("edit")).toBe(false);
 	});
 });

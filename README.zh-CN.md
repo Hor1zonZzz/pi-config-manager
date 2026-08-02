@@ -9,6 +9,7 @@ Pi Config Manager 是 [Pi Coding Agent](https://github.com/earendil-works/pi) �
 ## 主要特性
 
 - 在一个界面中管理 **Tools、Skills、Context Files 和 Extensions**
+- 显示当前真正提供给模型的 Effective 资源状态
 - 可搜索、全键盘操作的浮层，并保留当前对话作为背景
 - 持久化的 **Global** 资源设置，Preset 则隔离在当前 Session 中
 - Context Monitor 可查看所选资源对模型可见提示词的贡献
@@ -93,24 +94,30 @@ pi -e npm:pi-config-manager
 /contexts global enable|disable <absolute-path>
 ```
 
-## 自动选择编辑目标
+## Effective 视图与自动编辑目标
 
-可视化管理器会自动选择编辑目标，不再提供手动切换目标的按键：
+可视化管理器始终展示 **Effective** 资源状态：Pi 默认值、Global/项目设置、活动 Preset、Session 覆盖、外部激活和运行时约束组合后的最终结果。该状态会在下一次 Provider 请求中提供给模型。
 
-- 未激活 Preset 时，标签显示 **Global**。管理器展示 Global 选择；Tools、Skills 和 Context Files 的修改会写入 `~/.pi/agent/resource-settings.json`，并由新会话继承。
-- 激活命名 Preset 后，标签显示 **Session · preset名称**。管理器展示当前 Preset/Session 的实际生效状态；资源修改只作为该 Preset 的覆盖存入当前 Session 分支，不会修改 Global 设置或 `presets.json`。
+编辑目标仍然自动选择，不再提供手动切换目标的按键：
+
+- 未激活 Preset 时，页头显示 **View: Effective · Edit: Global**。Tools、Skills 和 Context Files 的修改会写入 `~/.pi/agent/resource-settings.json`，并由新会话继承。
+- 激活命名 Preset 后，页头显示 **View: Effective · Edit: Session · preset名称**。资源修改只作为该 Preset 的覆盖存入当前 Session 分支，不会修改 Global 设置或 `presets.json`。
+
+运行时约束具有最高工具优先级。受约束的工具会显示醒目的锁和策略层来源，例如 `🔒 edit · blocked by plan-mode` 或 `🔒 grep · required by plan-mode`。这类工具不能从管理器切换；必须先清除对应运行时约束，避免产生无法改变 Effective 状态的修改。
+
+受信任项目的 `.pi/resource-settings.json` 也可能禁用 Global 编辑目标无法重新启用的资源。未激活 Preset 时，这些资源会显示 `blocked by project settings` 并锁定；需要直接编辑项目配置文件。View、编辑目标和 Constraints 分行渲染，确保在管理器支持的最小宽度下仍然可见。
 
 激活或清除 Preset 会修改当前 Session 的模型、思考等级、资源和指令。恢复会话或切换 Session Tree 分支时，会同时恢复活动 Preset 及其 Session 覆盖。
 
-受信任的项目可以在 `.pi/resource-settings.json` 中加入项目专属默认值。可视化界面的 Global 目标只编辑 Global 设置；项目文件继续由项目单独维护和纳入版本控制。
+受信任的项目可以在 `.pi/resource-settings.json` 中加入项目专属默认值。可视化界面的 Global 编辑目标只修改 Global 设置；项目文件继续由项目单独维护和纳入版本控制。
 
-扩展开关独立于自动资源目标，因此 Extensions 页显示 **Pi settings**，而不是 Global 或 Session 目标。变更会先在界面中暂存，按 `S` 并确认重新加载后，再根据资源来源写入对应的全局或项目 Pi 设置。
+扩展开关独立于 Effective 资源视图，因此 Extensions 页显示 **View/Edit: Pi settings**。变更会先在界面中暂存，按 `S` 并确认重新加载后，再根据资源来源写入对应的全局或项目 Pi 设置。
 
 ## 各类资源的行为
 
 ### Tools
 
-工具变更通过 `pi.setActiveTools()` 立即生效。Config Manager 使用 Pi 已发现的工具清单，并在能够观察到时保留其他扩展动态加入的工具。Global defaults 同时保存显式启用和禁用，因此 Pi 注册但初始未激活的工具也可以被持久启用。
+未受约束的工具变更通过 `pi.setActiveTools()` 立即生效。Config Manager 使用 Pi 已发现的工具清单，并在能够观察到时保留其他扩展动态加入的工具。Global defaults 同时保存显式启用和禁用，因此 Pi 注册但初始未激活的工具也可以被持久启用。
 
 ### Skills
 

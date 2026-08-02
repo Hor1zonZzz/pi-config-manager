@@ -8,8 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- **Breaking:** Removed manual `G` target switching from the resource manager. With no active preset the manager displays and edits Global settings; with an active preset it displays and edits that preset's current Session state.
-- Renamed the idle resource target label from `Global defaults` to `Global`, the active-preset label to `Session · <preset>`, and the Extensions target to `Pi settings`.
+- **Breaking:** Removed manual `G` target switching from the resource manager. The manager now always displays Effective resource state while automatically editing Global settings without a preset or Session overrides with an active preset.
+- Split the resource header into explicit view/edit labels: `View: Effective · Edit: Global`, `View: Effective · Edit: Session · <preset>`, or `View/Edit: Pi settings` for Extensions.
+- Runtime-controlled tools now show the owning constraint and are locked against ineffective toggles.
+- Project-disabled resources are locked when the Global target cannot change their Effective state.
+- View, edit target, and constraint metadata now render on separate lines, with lock icons kept visible in narrow resource panes.
 
 ### Fixed
 
