@@ -96,7 +96,6 @@ interface ViewItem {
 	monitor?: MonitorPayload;
 }
 
-type ResourceScope = "session" | "default";
 type ToggleableResourceTab = "tools" | "skills" | "contexts";
 type PolicyPhase = "collecting" | "initializing" | "ready" | "stopped";
 
@@ -212,16 +211,11 @@ class ConfigManagerView implements Component, Focusable {
 
 	constructor(
 		initialTab: ResourceTab,
-		private scope: ResourceScope,
-		private readonly getSnapshot: (scope: ResourceScope) => ManagerSnapshot,
+		private readonly getSnapshot: () => ManagerSnapshot,
 		private readonly stagedExtensions: Map<string, ExtensionChange>,
 		private readonly theme: Theme,
 		private readonly keybindings: KeybindingsManager,
-		private readonly onToggle: (
-			tab: ResourceTab,
-			id: string,
-			scope: ResourceScope,
-		) => void,
+		private readonly onToggle: (tab: ResourceTab, id: string) => void,
 		private readonly onDone: (action: "close" | "save") => void,
 	) {
 		this.tab = initialTab;
@@ -246,13 +240,6 @@ class ConfigManagerView implements Component, Focusable {
 		}
 		if (this.keybindings.matches(data, "tui.input.tab")) {
 			this.changeTab(1);
-			return;
-		}
-		if (data === "G") {
-			this.scope = this.scope === "default" ? "session" : "default";
-			this.selected = 0;
-			this.monitorScroll = 0;
-			this.activePane = "resources";
 			return;
 		}
 		const items = this.filteredItems();
@@ -291,8 +278,7 @@ class ConfigManagerView implements Component, Focusable {
 		}
 		if (data === " " || this.keybindings.matches(data, "tui.select.confirm")) {
 			const item = items[this.selected];
-			if (item?.enabled !== undefined)
-				this.onToggle(this.tab, item.id, this.scope);
+			if (item?.enabled !== undefined) this.onToggle(this.tab, item.id);
 			return;
 		}
 		if (data === "S" && this.tab === "extensions") {
@@ -310,7 +296,7 @@ class ConfigManagerView implements Component, Focusable {
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
-		const snapshot = this.getSnapshot(this.scope);
+		const snapshot = this.getSnapshot();
 		const items = this.filteredItems();
 		this.selected = Math.min(this.selected, Math.max(0, items.length - 1));
 		const selectedItem = items[this.selected];
@@ -332,10 +318,15 @@ class ConfigManagerView implements Component, Focusable {
 			safeWidth,
 		);
 		if (safeWidth < 4) return [title];
-		const scopeLabel = this.theme.fg(
-			this.scope === "default" ? "success" : "warning",
-			`Target: ${this.scope === "default" ? "Global defaults" : "Current session"}`,
-		);
+		const scopeLabel =
+			this.tab === "extensions"
+				? this.theme.fg("success", "Target: Pi settings")
+				: snapshot.presetName
+					? this.theme.fg(
+							"warning",
+							`Target: Session · ${snapshot.presetName}`,
+						)
+					: this.theme.fg("success", "Target: Global");
 		const tabLine = truncateToWidth(
 			`${snapshot.ready ? tabs : `${tabs}  ${this.theme.fg("warning", "loading resources…")}`}  ·  ${scopeLabel}`,
 			safeWidth,
@@ -399,7 +390,7 @@ class ConfigManagerView implements Component, Focusable {
 			truncateToWidth(
 				this.theme.fg(
 					"dim",
-					`Type search · Tab tabs · G target · ←/→ panes · ↑/↓ move or scroll · Space toggle${saveHint} · Esc close`,
+					`Type search · Tab tabs · ←/→ panes · ↑/↓ move or scroll · Space toggle${saveHint} · Esc close`,
 				),
 				safeWidth,
 			),
@@ -526,7 +517,7 @@ class ConfigManagerView implements Component, Focusable {
 	}
 
 	private allItems(): ViewItem[] {
-		const snapshot = this.getSnapshot(this.scope);
+		const snapshot = this.getSnapshot();
 		if (this.tab === "overview") {
 			return [
 				{
@@ -786,6 +777,14 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		pi.appendEntry(SESSION_ENTRY, cloneSessionState(sessionState));
 	}
 
+	function resetSessionResourceOverrides(): void {
+		sessionState.tools = undefined;
+		sessionState.enabledSkills = [];
+		sessionState.disabledSkills = [];
+		sessionState.enabledContexts = [];
+		sessionState.disabledContexts = [];
+	}
+
 	function restoreSession(ctx: ExtensionContext): void {
 		sessionState = cloneSessionState(DEFAULT_SESSION_STATE);
 		for (const entry of ctx.sessionManager.getBranch()) {
@@ -804,14 +803,17 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		pi.events.emit("config-manager:state-changed", publicSnapshot());
 	}
 
-	function getSnapshotForScope(scope: ResourceScope): ManagerSnapshot {
-		if (scope === "session") return snapshot;
+	function getGlobalSnapshot(): ManagerSnapshot {
 		return {
 			...snapshot,
 			activeTools: policy.resolveGlobalDefaultTools(),
 			enabledSkills: policy.resolveGlobalDefaultSkills(snapshot.skills),
 			enabledContexts: policy.resolveGlobalDefaultContexts(snapshot.contexts),
 		};
+	}
+
+	function getManagerSnapshot(): ManagerSnapshot {
+		return activePresetName ? snapshot : getGlobalSnapshot();
 	}
 
 	function updateToolsInventory(): void {
@@ -876,6 +878,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		snapshot = {
 			...snapshot,
 			enabledSkills: policy.resolveEnabledSkills(snapshot.skills),
+			enabledContexts: policy.resolveEnabledContexts(snapshot.contexts),
 		};
 	}
 
@@ -915,7 +918,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			sessionState.preset?.originalState ?? currentOriginalState(ctx);
 		const configuredTools = validatedPresetTools(name, preset, ctx);
 		const appliedTools =
-			configuredTools ?? Array.from(policy.resolveBaseTools());
+			configuredTools ?? Array.from(policy.resolveConfiguredTools());
 
 		if (preset.provider && preset.model) {
 			const model = ctx.modelRegistry.find(preset.provider, preset.model);
@@ -935,9 +938,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 
 		activePresetName = name;
 		activePreset = preset;
-		sessionState.tools = undefined;
-		sessionState.enabledSkills = [];
-		sessionState.disabledSkills = [];
+		resetSessionResourceOverrides();
 		sessionState.preset = {
 			name,
 			customTools: false,
@@ -957,10 +958,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		activePreset = undefined;
 		policy.setProfile(undefined);
 		sessionState.preset = undefined;
-		sessionState.tools =
-			originalState?.tools ?? Array.from(policy.resolveGlobalDefaultTools());
-		sessionState.enabledSkills = [];
-		sessionState.disabledSkills = [];
+		resetSessionResourceOverrides();
 		policy.setSessionState(sessionState);
 		if (originalState?.provider && originalState.model) {
 			const model = ctx.modelRegistry.find(
@@ -973,6 +971,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		snapshot = {
 			...snapshot,
 			enabledSkills: policy.resolveEnabledSkills(snapshot.skills),
+			enabledContexts: policy.resolveEnabledContexts(snapshot.contexts),
 		};
 		reconcileTools();
 		persistSession();
@@ -987,6 +986,8 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			activePreset = undefined;
 			policy.setProfile(undefined);
 			if (state) sessionState.preset = undefined;
+			resetSessionResourceOverrides();
+			policy.setSessionState(sessionState);
 			updatePresetStatus(ctx);
 			return;
 		}
@@ -1327,19 +1328,15 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		updateToolsInventory();
 		await refreshExtensions(ctx);
 		const staged = new Map<string, ExtensionChange>();
-		const initialScope: ResourceScope = snapshot.presetName
-			? "session"
-			: "default";
 		const action = await ctx.ui.custom<"close" | "save">(
 			(tui, theme, keybindings, done) =>
 				new ConfigManagerView(
 					initialTab,
-					initialScope,
-					getSnapshotForScope,
+					getManagerSnapshot,
 					staged,
 					theme,
 					keybindings,
-					(tab, id, scope) => {
+					(tab, id) => {
 						if (tab === "extensions") {
 							const resource = snapshot.extensions.find(
 								(item) => item.path === id,
@@ -1361,18 +1358,18 @@ export default function piConfigManager(pi: ExtensionAPI) {
 							}
 							const current = staged.get(id)?.enabled ?? resource.enabled;
 							staged.set(id, { resource, enabled: !current });
-						} else if (tab !== "overview" && scope === "default") {
-							const scoped = getSnapshotForScope("default");
-							setGlobalResource(
-								tab,
-								id,
-								!isResourceEnabled(scoped, tab, id),
-								ctx,
-							);
-						} else if (tab !== "overview") {
+						} else if (tab !== "overview" && activePresetName) {
 							toggleSessionResource(tab, id, ctx);
 							updatePromptInventory(ctx.getSystemPromptOptions());
 							updateToolsInventory();
+						} else if (tab !== "overview") {
+							const globalSnapshot = getGlobalSnapshot();
+							setGlobalResource(
+								tab,
+								id,
+								!isResourceEnabled(globalSnapshot, tab, id),
+								ctx,
+							);
 						}
 						tui.requestRender();
 					},
@@ -1649,9 +1646,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		restoreSession(ctx);
 		const presetFlag = pi.getFlag("preset");
 		if (typeof presetFlag === "string" && presetFlag) {
-			sessionState.tools = undefined;
-			sessionState.enabledSkills = [];
-			sessionState.disabledSkills = [];
+			resetSessionResourceOverrides();
 			sessionState.preset = undefined;
 			activePresetName = undefined;
 			activePreset = undefined;

@@ -10,7 +10,7 @@ Pi Config Manager is a resource-policy extension for [Pi Coding Agent](https://g
 
 - One UI for **Tools**, **Skills**, **Context Files**, and **Extensions**
 - Searchable, keyboard-driven overlay that keeps the current conversation visible
-- Persistent **Global defaults** and branch-aware **Current session** overrides
+- Persistent **Global** resource settings, with presets isolated to the current session
 - Context Monitor showing how the selected resource contributes to the model-visible prompt
 - A compact resource HUD above the editor
 - Source-aware extension toggles saved through Pi's public settings APIs
@@ -56,9 +56,8 @@ Start Pi, then run:
 1. Run `/config-manager`.
 2. Press `Tab` to move between resource tabs.
 3. Type to filter the current list.
-4. Press `Space` or `Enter` to toggle the selected resource.
-5. Press `G` to switch the edit target between Global defaults and Current session.
-6. In Extensions, press `S` to save staged changes and reload Pi.
+4. Press `Space` or `Enter` to toggle the selected resource in the automatically selected target.
+5. In Extensions, press `S` to save staged changes and reload Pi.
 
 ### Keyboard controls
 
@@ -68,8 +67,7 @@ Start Pi, then run:
 | Type text | Filter the current resource list |
 | `↑` / `↓` | Move through resources, or scroll the focused monitor |
 | `←` / `→` | Focus the resource list or Context Monitor |
-| `Space` / `Enter` | Toggle the selected resource |
-| `G` | Switch Global defaults/Current session edit target |
+| `Space` / `Enter` | Toggle the selected resource in the active target |
 | `S` | Save staged extension changes and reload Pi |
 | `Esc` | Close the manager |
 
@@ -95,20 +93,18 @@ Global defaults can also be changed directly:
 /contexts global enable|disable <absolute-path>
 ```
 
-## Edit targets
+## Automatic edit target
 
-Preset selection and edit persistence are managed together but remain distinct policy layers. The manager displays one effective resource state and lets `G` choose where a change is recorded:
+The visual manager chooses its target automatically; there is no manual target-switching key:
 
-| Edit target | Persistence | Best for |
-| --- | --- | --- |
-| **Global defaults** | Writes global choices to `~/.pi/agent/resource-settings.json`; new sessions inherit them | Your normal tool, skill, and context setup |
-| **Current session** | Stores overrides in the current session branch | Temporary changes to Base or the active named preset |
+- With no active preset, the label is **Global**. The manager displays Global choices, and tool, skill, and context changes are written to `~/.pi/agent/resource-settings.json` for new sessions to inherit.
+- With a named preset active, the label is **Session · preset-name**. The manager displays the current effective preset/session state, and resource changes are stored only in the current session branch as overrides of that preset. They do not modify Global settings or `presets.json`.
 
-With no active preset, Config Manager initially targets **Global defaults**. With a named preset active, it initially targets **Current session**. The effective state always includes Base policy, the active preset, session overrides, and runtime constraints regardless of the selected edit target.
+Activating or clearing a preset changes the current session's model, thinking level, resources, and instructions. Session resume and tree navigation restore both the active preset and its session overrides.
 
-Trusted projects may add repository-specific defaults in `.pi/resource-settings.json`. The visual Global defaults target edits only global defaults; project files stay source-controlled and are edited separately.
+Trusted projects may add repository-specific defaults in `.pi/resource-settings.json`. The visual Global target edits only Global settings; project files stay source-controlled and are edited separately.
 
-Extension changes are independent of the resource edit target. They are staged in the UI and then written to the appropriate global or project Pi settings when you press `S` and confirm reload.
+Extension changes are independent of the automatic resource target. The Extensions tab therefore displays **Pi settings** instead of a Global or Session target. Changes are staged in the UI and then written to the appropriate global or project Pi settings when you press `S` and confirm reload.
 
 ## Resource behavior
 
@@ -169,7 +165,7 @@ Schema:
 }
 ```
 
-Session overrides and the active preset are stored together as version 2 `pi-config-manager-state` entries in Pi's session tree, so `/tree`, resume, and branch navigation restore the correct policy.
+The active preset, its restoration state, and preset-specific session overrides are stored as version 2 `pi-config-manager-state` entries in Pi's session tree, so `/tree`, resume, and branch navigation restore the correct session policy.
 
 Version 2 is an intentional breaking reset. Version 1 `pi-config-manager-state`, standalone `preset-state`, `tools-config`, and `skills-manager-state` entries are not imported.
 
@@ -197,21 +193,21 @@ Project-local presets are loaded only for trusted projects and override global p
 }
 ```
 
-Use `/preset`, `/preset <name>`, `pi --preset <name>`, or `Ctrl+Shift+U`. Selecting `(none)` restores the model, thinking level, and base tool policy captured before the first preset was activated. An explicit empty `tools` or `skills` array enables none; omitting either field preserves the corresponding normal policy. Preset instructions are appended to the system prompt while the preset is active.
+Use `/preset`, `/preset <name>`, `pi --preset <name>`, or `Ctrl+Shift+U`. Selecting `(none)` restores the model and thinking level captured before the first preset was activated, clears preset-specific resource overrides, and returns resources to the current Global/project policy. An explicit empty `tools` or `skills` array enables none; omitting either field preserves the corresponding normal policy. Preset instructions are appended to the system prompt while the preset is active.
 
 The package includes the `preset-settings` skill for safely editing these files.
 
 ## Policy precedence
 
 ```text
-runtime constraint > session override > preset > project/global default > Pi default
+runtime constraint > preset session override > preset > project/global setting > Pi default
 ```
 
 Runtime constraints currently apply to tools. They are intended for integrations such as read-only or sandbox modes.
 
 ### Policy architecture
 
-Config Manager has one extension entrypoint and one `PolicyManager`. Base settings, the first-party Preset feature, session overrides, and external runtime layers all submit policy to that core; only the core resolves and applies the effective resource state. Presets therefore use an internal typed profile-policy interface rather than a compatibility event bridge. External plugins retain the defensive runtime-layer event API below because they cannot share the package's internal controller.
+Config Manager has one extension entrypoint and one `PolicyManager`. Pi defaults, Global/project settings, the first-party session-scoped Preset feature and its session overrides, and external runtime layers all submit policy to that core; only the core resolves and applies the effective resource state. Presets therefore use an internal typed profile-policy interface rather than a compatibility event bridge. External plugins retain the defensive runtime-layer event API below because they cannot share the package's internal controller.
 
 ## Integration events
 

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Removed manual `G` target switching from the resource manager. With no active preset the manager displays and edits Global settings; with an active preset it displays and edits that preset's current Session state.
+- Renamed the idle resource target label from `Global defaults` to `Global`, the active-preset label to `Session · <preset>`, and the Extensions target to `Pi settings`.
+
+### Fixed
+
+- Clear hidden resource-session overrides whenever no preset is active, so effective resources cannot diverge from the Global view.
+- Reset tool, skill, and context overrides when switching or clearing presets, preventing state from leaking between presets.
+- Avoid labeling persistent Extension changes as Session-scoped while a preset is active.
+
 ## [0.1.2] - 2026-08-01
 
 ### Added

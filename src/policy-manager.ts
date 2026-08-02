@@ -112,6 +112,10 @@ export class PolicyManager {
 				overridden.filter((name) => this.discoveredTools.has(name)),
 			);
 		}
+		return this.resolveConfiguredTools();
+	}
+
+	resolveConfiguredTools(): Set<string> {
 		const disabled = this.effectiveDisabledTools();
 		return new Set(
 			[

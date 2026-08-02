@@ -10,7 +10,7 @@ Pi Config Manager 是 [Pi Coding Agent](https://github.com/earendil-works/pi) �
 
 - 在一个界面中管理 **Tools、Skills、Context Files 和 Extensions**
 - 可搜索、全键盘操作的浮层，并保留当前对话作为背景
-- 持久化的 **Global defaults** 与跟随会话分支的 **Current session** 覆盖
+- 持久化的 **Global** 资源设置，Preset 则隔离在当前 Session 中
 - Context Monitor 可查看所选资源对模型可见提示词的贡献
 - 编辑器上方显示紧凑的资源状态 HUD
 - 根据资源来源，通过 Pi 公开设置 API 保存扩展开关
@@ -56,9 +56,8 @@ pi -e npm:pi-config-manager
 1. 运行 `/config-manager`。
 2. 按 `Tab` 在资源页签之间切换。
 3. 直接输入文字过滤当前列表。
-4. 按 `Space` 或 `Enter` 切换所选资源。
-5. 按 `G` 在 Global defaults 与 Current session 之间切换编辑目标。
-6. 在 Extensions 页按 `S` 保存暂存变更并重新加载 Pi。
+4. 按 `Space` 或 `Enter` 在自动选择的目标中切换所选资源。
+5. 在 Extensions 页按 `S` 保存暂存变更并重新加载 Pi。
 
 ### 键盘操作
 
@@ -68,8 +67,7 @@ pi -e npm:pi-config-manager
 | 输入文字 | 过滤当前资源列表 |
 | `↑` / `↓` | 移动选择，或滚动已聚焦的 Monitor |
 | `←` / `→` | 聚焦资源列表或 Context Monitor |
-| `Space` / `Enter` | 切换所选资源 |
-| `G` | 切换 Global defaults/Current session 编辑目标 |
+| `Space` / `Enter` | 在当前目标中切换所选资源 |
 | `S` | 保存暂存的扩展变更并重新加载 Pi |
 | `Esc` | 关闭管理器 |
 
@@ -95,20 +93,18 @@ pi -e npm:pi-config-manager
 /contexts global enable|disable <absolute-path>
 ```
 
-## 编辑目标
+## 自动选择编辑目标
 
-Preset 选择与修改持久化由同一个策略系统管理，但仍是不同的策略层。管理器只展示一份最终有效状态，按 `G` 可以选择修改记录到哪里：
+可视化管理器会自动选择编辑目标，不再提供手动切换目标的按键：
 
-| 编辑目标 | 持久化方式 | 适用场景 |
-| --- | --- | --- |
-| **Global defaults** | 将全局选择写入 `~/.pi/agent/resource-settings.json`，新会话会继承 | 日常使用的工具、技能和上下文配置 |
-| **Current session** | 将覆盖项存储在当前会话分支中 | 临时调整 Base 或当前命名 Preset |
+- 未激活 Preset 时，标签显示 **Global**。管理器展示 Global 选择；Tools、Skills 和 Context Files 的修改会写入 `~/.pi/agent/resource-settings.json`，并由新会话继承。
+- 激活命名 Preset 后，标签显示 **Session · preset名称**。管理器展示当前 Preset/Session 的实际生效状态；资源修改只作为该 Preset 的覆盖存入当前 Session 分支，不会修改 Global 设置或 `presets.json`。
 
-没有激活 Preset 时，Config Manager 初始选择 **Global defaults**；激活命名 Preset 后，初始选择 **Current session**。无论当前编辑目标是什么，最终状态始终组合 Base 策略、当前 Preset、Session 覆盖和运行时约束。
+激活或清除 Preset 会修改当前 Session 的模型、思考等级、资源和指令。恢复会话或切换 Session Tree 分支时，会同时恢复活动 Preset 及其 Session 覆盖。
 
-受信任的项目可以在 `.pi/resource-settings.json` 中加入项目专属默认值。可视化界面的 Global defaults 目标只编辑全局默认值；项目文件继续由项目单独维护和纳入版本控制。
+受信任的项目可以在 `.pi/resource-settings.json` 中加入项目专属默认值。可视化界面的 Global 目标只编辑 Global 设置；项目文件继续由项目单独维护和纳入版本控制。
 
-扩展开关不受资源编辑目标影响。它们会先在界面中暂存，按 `S` 并确认重新加载后，再根据资源来源写入对应的全局或项目 Pi 设置。
+扩展开关独立于自动资源目标，因此 Extensions 页显示 **Pi settings**，而不是 Global 或 Session 目标。变更会先在界面中暂存，按 `S` 并确认重新加载后，再根据资源来源写入对应的全局或项目 Pi 设置。
 
 ## 各类资源的行为
 
@@ -169,7 +165,7 @@ Preset 选择与修改持久化由同一个策略系统管理，但仍是不同�
 }
 ```
 
-Session 覆盖和当前 Preset 统一存储为版本 2 的 `pi-config-manager-state` 条目，因此 `/tree`、恢复会话和分支导航都能还原对应策略。
+当前 Preset、恢复状态及其 Session 覆盖存储为版本 2 的 `pi-config-manager-state` 条目，因此 `/tree`、恢复会话和分支导航都能还原对应的 Session 策略。
 
 版本 2 是有意的破坏性状态重置。版本 1 的 `pi-config-manager-state` 以及独立的 `preset-state`、`tools-config`、`skills-manager-state` 条目不会被导入。
 
@@ -197,21 +193,21 @@ Config Manager 从以下位置加载命名 Preset：
 }
 ```
 
-可以使用 `/preset`、`/preset <名称>`、`pi --preset <名称>` 或 `Ctrl+Shift+U`。选择 `(none)` 会恢复进入第一个 Preset 前记录的模型、思考等级和基础工具策略。显式空的 `tools` 或 `skills` 数组表示全部禁用；省略字段表示保留对应的正常策略。Preset 激活期间，其 `instructions` 会追加到系统提示词。
+可以使用 `/preset`、`/preset <名称>`、`pi --preset <名称>` 或 `Ctrl+Shift+U`。选择 `(none)` 会恢复进入第一个 Preset 前记录的模型与思考等级，清除 Preset 专属资源覆盖，并让资源回到当前 Global/项目策略。显式空的 `tools` 或 `skills` 数组表示全部禁用；省略字段表示保留对应的正常策略。Preset 激活期间，其 `instructions` 会追加到系统提示词。
 
 该包同时提供 `preset-settings` Skill，用于安全编辑这些配置文件。
 
 ## 策略优先级
 
 ```text
-运行时约束 > Session 覆盖 > 预设 > 项目/全局默认值 > Pi 默认值
+运行时约束 > Preset Session 覆盖 > Preset > 项目/Global 设置 > Pi 默认值
 ```
 
 目前运行时约束只作用于工具，主要供只读模式、沙箱模式等扩展集成使用。
 
 ### 策略架构
 
-Config Manager 只有一个扩展入口和一个 `PolicyManager`。Base 设置、第一方 Preset Feature、Session 覆盖和外部运行时策略层都向该核心提交策略，只有核心负责计算并应用最终资源状态。因此 Preset 使用包内类型化 Profile Policy 接口，而不是兼容事件桥；外部插件无法共享包内 controller，所以继续使用下方具备生命周期防护的运行时策略层事件 API。
+Config Manager 只有一个扩展入口和一个 `PolicyManager`。Pi 默认值、Global/项目设置、第一方 Session Preset Feature 及其 Session 覆盖和外部运行时策略层都向该核心提交策略，只有核心负责计算并应用最终资源状态。因此 Preset 使用包内类型化 Profile Policy 接口，而不是兼容事件桥；外部插件无法共享包内 controller，所以继续使用下方具备生命周期防护的运行时策略层事件 API。
 
 ## 扩展集成事件
 

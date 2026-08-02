@@ -602,7 +602,8 @@ describe("manager behavior contract", () => {
 		expect(harness.getActiveTools()).toEqual(["read", "write"]);
 	});
 
-	test("preserves session, runtime-layer, and external-tool precedence", async () => {
+	test("preserves preset session, runtime-layer, and external-tool precedence", async () => {
+		writePresets({ focus: { tools: ["read"] } });
 		const harness = createHarness({
 			tools: [
 				{ name: "read" },
@@ -622,6 +623,17 @@ describe("manager behavior contract", () => {
 						disabledSkills: [],
 						enabledContexts: [],
 						disabledContexts: [],
+						preset: {
+							name: "focus",
+							customTools: true,
+							appliedTools: ["read"],
+							originalState: {
+								provider: "fixture",
+								model: "base",
+								thinkingLevel: "medium",
+								tools: ["read", "bash", "edit"],
+							},
+						},
 					},
 				},
 			],
@@ -640,6 +652,35 @@ describe("manager behavior contract", () => {
 			expect(harness.getActiveTools()).toEqual(["questionnaire", "bash"]);
 			harness.events.emit("config-manager:layer-clear", { id: "plan-mode" });
 			expect(harness.getActiveTools()).toEqual(["edit", "questionnaire"]);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("discards resource session overrides when no preset is active", async () => {
+		const harness = createHarness({
+			tools: [{ name: "read" }, { name: "bash" }],
+			activeTools: ["read", "bash"],
+			branch: [
+				{
+					type: "custom",
+					customType: "pi-config-manager-state",
+					data: {
+						version: 2,
+						tools: ["read"],
+						enabledSkills: ["hidden-skill"],
+						disabledSkills: ["other-skill"],
+						enabledContexts: ["/hidden/context.md"],
+						disabledContexts: ["/other/context.md"],
+					},
+				},
+			],
+		});
+		await harness.start();
+		try {
+			expect(new Set(harness.getActiveTools())).toEqual(
+				new Set(["read", "bash"]),
+			);
 		} finally {
 			await harness.shutdown();
 		}
@@ -845,6 +886,9 @@ describe("manager behavior contract", () => {
 	});
 
 	test("filters disabled skills and contexts from the standard system prompt", async () => {
+		writePresets({
+			focus: { tools: ["read"], skills: ["alpha", "beta"] },
+		});
 		const skills: SkillFixture[] = [
 			{
 				name: "alpha",
@@ -900,6 +944,17 @@ describe("manager behavior contract", () => {
 						disabledSkills: ["beta"],
 						enabledContexts: [],
 						disabledContexts: ["/project/EXTRA.md"],
+						preset: {
+							name: "focus",
+							customTools: true,
+							appliedTools: ["read"],
+							originalState: {
+								provider: "fixture",
+								model: "base",
+								thinkingLevel: "medium",
+								tools: ["read"],
+							},
+						},
 					},
 				},
 			],
@@ -978,7 +1033,8 @@ describe("manager behavior contract", () => {
 				"Pi Config Manager · Context Monitor",
 			);
 			expect(renderedText).toContain("[Tools]");
-			expect(renderedText).toContain("Target: Global defaults");
+			expect(renderedText).toContain("Target: Global");
+			expect(renderedText).not.toContain("G target");
 			expect(renderedText).toContain("System prompt Available tools entry:");
 			expect(renderedText).toContain("- read: Read files safely");
 			expect(renderedText).toContain("System prompt guidelines:");
@@ -1068,15 +1124,20 @@ describe("manager behavior contract", () => {
 		}
 	});
 
-	test("switches to the current session target without changing global defaults", async () => {
+	test("shows and edits the current session when a preset is active", async () => {
+		writePresets({ focus: { tools: ["read"] } });
 		const harness = createHarness({
-			tools: [{ name: "read", description: "Read files" }],
-			activeTools: ["read"],
+			tools: [
+				{ name: "read", description: "Read files" },
+				{ name: "bash", description: "Run commands" },
+			],
+			activeTools: ["read", "bash"],
 		});
 		await harness.start();
 		try {
-			let defaultView = "";
-			let sessionView = "";
+			await harness.commands.get("preset").handler("focus", harness.ctx);
+			let rendered = "";
+			let extensionsRendered = "";
 			harness.setCustomImplementation(async (factory) => {
 				let result: "close" | "save" = "close";
 				const component = await factory(
@@ -1087,32 +1148,114 @@ describe("manager behavior contract", () => {
 						result = value;
 					},
 				);
-				defaultView = component.render(100).join("\n");
-				component.handleInput("G");
-				sessionView = component.render(100).join("\n");
+				rendered = component.render(100).join("\n");
 				component.handleInput(" ");
+				component.handleInput("tab");
+				component.handleInput("tab");
+				component.handleInput("tab");
+				extensionsRendered = component.render(100).join("\n");
 				component.handleInput("escape");
 				return result;
 			});
 
 			await harness.commands.get("tools").handler("", harness.ctx);
-			expect(defaultView).toContain("Target: Global defaults");
-			expect(sessionView).toContain("Target: Current session");
+			expect(rendered).toContain("Target: Session · focus");
+			expect(rendered).not.toContain("G target");
+			expect(extensionsRendered).toContain("Target: Pi settings");
+			expect(extensionsRendered).not.toContain("Target: Session");
 			expect(existsSync(join(agentDir, "resource-settings.json"))).toBe(false);
-			expect(
-				harness.entries.some(
-					(entry) =>
-						entry.customType === "pi-config-manager-state" &&
-						Array.isArray(entry.data.tools) &&
-						entry.data.tools.length === 0,
-				),
-			).toBe(true);
+			expect(new Set(harness.getActiveTools())).toEqual(
+				new Set(["read", "bash"]),
+			);
+			const state = harness.entries
+				.filter((entry) => entry.customType === "pi-config-manager-state")
+				.at(-1)?.data;
+			expect(state.preset).toMatchObject({
+				name: "focus",
+				customTools: true,
+				appliedTools: ["read"],
+			});
+			expect(new Set(state.tools)).toEqual(new Set(["read", "bash"]));
 		} finally {
 			await harness.shutdown();
 		}
 	});
 
-	test("persists skill toggles from the global defaults target", async () => {
+	test("resets preset session overrides when switching and clearing presets", async () => {
+		writePresets({
+			focus: { tools: ["read"] },
+			review: {},
+		});
+		const contextPath = "/project/AGENTS.md";
+		const harness = createHarness({
+			tools: [{ name: "read" }, { name: "bash" }],
+			activeTools: ["read", "bash"],
+			promptOptions: {
+				selectedTools: ["read", "bash"],
+				toolSnippets: {},
+				skills: [],
+				contextFiles: [{ path: contextPath, content: "instructions" }],
+			},
+		});
+		await harness.start();
+		try {
+			await harness.commands.get("preset").handler("focus", harness.ctx);
+			harness.setCustomImplementation(async (factory) => {
+				let result: "close" | "save" = "close";
+				const component = await factory(
+					{ requestRender() {} },
+					createTheme(),
+					createKeybindings(),
+					(value: "close" | "save") => {
+						result = value;
+					},
+				);
+				component.handleInput(" ");
+				component.handleInput("escape");
+				return result;
+			});
+			await harness.commands.get("contexts").handler("", harness.ctx);
+			let state = harness.entries
+				.filter((entry) => entry.customType === "pi-config-manager-state")
+				.at(-1)?.data;
+			expect(state.disabledContexts).toEqual([contextPath]);
+
+			await harness.commands.get("preset").handler("review", harness.ctx);
+			state = harness.entries
+				.filter((entry) => entry.customType === "pi-config-manager-state")
+				.at(-1)?.data;
+			expect(state.disabledContexts).toEqual([]);
+			expect(state.enabledContexts).toEqual([]);
+			expect(state.tools).toBeUndefined();
+			expect(new Set(harness.getActiveTools())).toEqual(
+				new Set(["read", "bash"]),
+			);
+			const publicState = harness.emissions
+				.filter((event) => event.name === "config-manager:state-changed")
+				.at(-1)?.data;
+			expect(publicState.contexts).toEqual({ enabled: 1, total: 1 });
+
+			const shortcut = Array.from(harness.shortcuts.values())[0];
+			await shortcut.handler(harness.ctx);
+			state = harness.entries
+				.filter((entry) => entry.customType === "pi-config-manager-state")
+				.at(-1)?.data;
+			expect(state.preset).toBeUndefined();
+			expect(state.tools).toBeUndefined();
+			expect(state.enabledSkills).toEqual([]);
+			expect(state.disabledSkills).toEqual([]);
+			expect(state.enabledContexts).toEqual([]);
+			expect(state.disabledContexts).toEqual([]);
+			expect(new Set(harness.getActiveTools())).toEqual(
+				new Set(["read", "bash"]),
+			);
+			expect(existsSync(join(agentDir, "resource-settings.json"))).toBe(false);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("persists skill toggles from the global target", async () => {
 		const harness = createHarness({
 			tools: [{ name: "read", description: "Read files" }],
 			activeTools: ["read"],
@@ -1144,7 +1287,7 @@ describe("manager behavior contract", () => {
 			});
 
 			await harness.commands.get("skills").handler("", harness.ctx);
-			expect(rendered).toContain("Target: Global defaults");
+			expect(rendered).toContain("Target: Global");
 			expect(readResourceSettings()).toEqual({
 				version: 1,
 				enabledTools: [],
