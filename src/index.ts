@@ -28,6 +28,10 @@ import {
 	resolveExtensions,
 	saveExtensionChanges,
 } from "./extensions";
+import {
+	getHighlightedLineIndexes,
+	type PromptHighlightTarget,
+} from "./prompt-highlighting";
 import { PolicyManager } from "./policy-manager";
 import {
 	installPresetEditor,
@@ -83,7 +87,7 @@ interface MonitorPayload {
 	status: string;
 	statusColor: "success" | "warning" | "dim";
 	content: string;
-	highlights?: string[];
+	highlightTarget?: PromptHighlightTarget;
 	note?: string;
 }
 
@@ -472,10 +476,14 @@ class ConfigManagerView implements Component, Focusable {
 		const monitor = item.monitor;
 		const safeWidth = Math.max(1, width);
 		const rows: string[] = [];
-		const highlights = monitor.highlights ?? [];
+		const highlightedLines = monitor.highlightTarget
+			? getHighlightedLineIndexes(monitor.content, monitor.highlightTarget)
+			: new Set<number>();
 		const hasHighlight =
-			highlights.length === 0 ||
-			highlights.some((highlight) => monitor.content.includes(highlight));
+			!monitor.highlightTarget ||
+			(monitor.highlightTarget.kind !== "skill-fields" &&
+				monitor.highlightTarget.lines.length === 0) ||
+			highlightedLines.size > 0;
 		let highlightedRow = -1;
 		const addWrapped = (line: string) => {
 			rows.push(...wrapTextWithAnsi(line, safeWidth));
@@ -502,10 +510,10 @@ class ConfigManagerView implements Component, Focusable {
 			);
 		}
 		rows.push("");
-		for (const rawLine of monitor.content.split("\n")) {
-			const highlighted = Boolean(
-				rawLine && highlights.some((highlight) => rawLine.includes(highlight)),
-			);
+		for (const [lineIndex, rawLine] of monitor.content
+			.split("\n")
+			.entries()) {
+			const highlighted = rawLine.length > 0 && highlightedLines.has(lineIndex);
 			if (highlighted && highlightedRow < 0) highlightedRow = rows.length;
 			const styled = rawLine
 				? highlighted
@@ -650,16 +658,19 @@ class ConfigManagerView implements Component, Focusable {
 										]
 									: []),
 							].join("\n"),
-							highlights: systemPromptVisible
-								? [
-										...(tool.promptSnippet
-											? [`- ${tool.name}: ${tool.promptSnippet}`]
-											: []),
-										...(tool.promptGuidelines ?? [])
-											.map((line) => line.trim())
-											.filter(Boolean)
-											.map((line) => `- ${line}`),
-									]
+							highlightTarget: systemPromptVisible
+								? {
+										kind: "contains-lines",
+										lines: [
+											...(tool.promptSnippet
+												? [`- ${tool.name}: ${tool.promptSnippet}`]
+												: []),
+											...(tool.promptGuidelines ?? [])
+												.map((line) => line.trim())
+												.filter(Boolean)
+												.map((line) => `- ${line}`),
+										],
+								  }
 								: undefined,
 						},
 						active,
@@ -712,7 +723,10 @@ class ConfigManagerView implements Component, Focusable {
 									disableModelInvocation: false,
 								} satisfies Skill,
 							]).trim(),
-							highlights: [skill.name],
+							highlightTarget: {
+								kind: "skill-fields",
+								skillName: skill.name,
+							},
 						},
 						catalogVisible,
 					),
@@ -742,7 +756,10 @@ class ConfigManagerView implements Component, Focusable {
 							statusColor: enabled ? "success" : "warning",
 							note: "This previews Pi's base prompt; later extension prompt rewrites can still differ.",
 							content: formatContextSection([context]).trim(),
-							highlights: [`<project_instructions path="${context.path}">`],
+							highlightTarget: {
+								kind: "contains-lines",
+								lines: [`<project_instructions path="${context.path}">`],
+							},
 						},
 						enabled,
 					),
