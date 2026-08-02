@@ -172,9 +172,13 @@ Schema:
 }
 ```
 
-The active preset, its restoration state, and preset-specific session overrides are stored as version 2 `pi-config-manager-state` entries in Pi's session tree, so `/tree`, resume, and branch navigation restore the correct session policy.
+The `version: 1` field above identifies the **resource-settings schema**. It is not the npm package version and is unrelated to the internal Session-state version. The current loader normalizes a missing value to schema 1, but keeping the field in manually authored files makes future format upgrades explicit.
 
-Version 2 is an intentional breaking reset. Version 1 `pi-config-manager-state`, standalone `preset-state`, `tools-config`, and `skills-manager-state` entries are not imported.
+### Internal Session state
+
+Config Manager separately writes `pi-config-manager-state` entries into Pi's session tree. These internal entries store the active preset, restoration state, and preset-specific Session overrides so `/tree`, resume, and branch navigation can restore the correct policy. Users do not add these entries to `resource-settings.json` or `presets.json`.
+
+The internal `pi-config-manager-state` schema is currently version 2. This number applies only to Session entries; it does **not** supersede `resource-settings.json` schema 1. The earlier Session schema 1 and standalone `preset-state`, `tools-config`, and `skills-manager-state` entries are intentionally not imported after the breaking state reset.
 
 ## Presets
 

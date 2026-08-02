@@ -172,9 +172,13 @@ pi -e npm:pi-config-manager
 }
 ```
 
-当前 Preset、恢复状态及其 Session 覆盖存储为版本 2 的 `pi-config-manager-state` 条目，因此 `/tree`、恢复会话和分支导航都能还原对应的 Session 策略。
+上面的 `version: 1` 表示 **resource-settings 配置格式版本**。它不是 npm 包版本，也与内部 Session 状态版本无关。当前加载器会把缺失的值标准化为格式 1，但手动编写配置文件时建议保留该字段，以便将来明确识别格式升级。
 
-版本 2 是有意的破坏性状态重置。版本 1 的 `pi-config-manager-state` 以及独立的 `preset-state`、`tools-config`、`skills-manager-state` 条目不会被导入。
+### 内部 Session 状态
+
+Config Manager 会另外在 Pi 的 Session Tree 中自动写入 `pi-config-manager-state` 条目。这些内部条目用于保存当前 Preset、恢复状态及 Preset 专属的 Session 覆盖，使 `/tree`、恢复会话和分支导航能够还原正确策略。用户不需要、也不应该把这些条目写入 `resource-settings.json` 或 `presets.json`。
+
+内部 `pi-config-manager-state` 当前使用格式版本 2。这个数字只属于 Session 条目，**不会取代** `resource-settings.json` 的格式版本 1。破坏性状态重置后，旧的 Session 格式版本 1，以及独立的 `preset-state`、`tools-config` 和 `skills-manager-state` 条目不会被导入。
 
 ## Preset
 
