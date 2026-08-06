@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added read-only custom system prompt, merged appended prompt, and active preset instruction entries directly to the Contexts view.
+- Added effective-prompt presence verification for enabled and disabled skills and context files, including explicit warnings when disabled resources are reintroduced.
+
+### Changed
+
+- Keep monitor status metadata visible while scrolling captured prompt content.
+- Refresh pre-run prompt previews whenever the manager opens and publish current skill/context counts after policy changes.
+- Filter every duplicate standard skill/context prompt section and report filtering failures on every affected run.
+
 ## [0.2.0] - 2026-08-02
 
 ### Changed

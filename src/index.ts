@@ -30,13 +30,11 @@ import {
 } from "./extensions";
 import {
 	getHighlightedLineIndexes,
+	promptContainsTarget,
 	type PromptHighlightTarget,
 } from "./prompt-highlighting";
 import { PolicyManager } from "./policy-manager";
-import {
-	installPresetEditor,
-	type PresetBorderEditor,
-} from "./preset-editor";
+import { installPresetEditor, type PresetBorderEditor } from "./preset-editor";
 import {
 	describePreset,
 	loadPresets,
@@ -81,14 +79,25 @@ const LABELS: Record<ResourceTab, string> = {
 	extensions: "Extensions",
 };
 
+interface PromptPresenceExpectation {
+	shouldBePresent: boolean;
+	stateLabel: string;
+}
+
 interface MonitorPayload {
 	title: string;
 	channel: string;
 	status: string;
-	statusColor: "success" | "warning" | "dim";
+	statusColor: "success" | "warning" | "error" | "dim";
 	content: string;
 	highlightTarget?: PromptHighlightTarget;
+	presenceExpected?: boolean;
 	note?: string;
+}
+
+interface CapturedPromptOptions {
+	showFullPrompt: boolean;
+	expectation?: PromptPresenceExpectation;
 }
 
 interface ViewItem {
@@ -149,22 +158,50 @@ function padToWidth(text: string, width: number): string {
 function showCapturedSystemPrompt(
 	snapshot: ManagerSnapshot,
 	monitor: MonitorPayload,
-	showFullPrompt: boolean,
+	options: CapturedPromptOptions,
 ): MonitorPayload {
 	const captured = snapshot.effectiveSystemPrompt;
-	if (!showFullPrompt || !captured) return monitor;
+	if (!options.showFullPrompt || !captured) return monitor;
 	const isAgentPrompt = captured.source === "agent-start";
+	const expectation = options.expectation;
+	const found = monitor.highlightTarget
+		? promptContainsTarget(captured.content, monitor.highlightTarget)
+		: false;
+	let status = isAgentPrompt
+		? "captured after the latest agent start"
+		: "captured before an agent run";
+	let statusColor: MonitorPayload["statusColor"] = "success";
+	let presenceExpected: boolean | undefined;
+	if (expectation) {
+		if (!isAgentPrompt) {
+			status = `${expectation.stateLabel} · awaiting verification at the next agent start`;
+			statusColor = "dim";
+			presenceExpected = false;
+		} else {
+			presenceExpected = expectation.shouldBePresent;
+			if (expectation.shouldBePresent && found) {
+				status = `${expectation.stateLabel} · found in effective prompt`;
+			} else if (expectation.shouldBePresent) {
+				status = `${expectation.stateLabel} · NOT FOUND in effective prompt`;
+				statusColor = "warning";
+			} else if (found) {
+				status = `${expectation.stateLabel} · FOUND IN EFFECTIVE PROMPT`;
+				statusColor = "error";
+			} else {
+				status = `${expectation.stateLabel} · absent from effective prompt`;
+			}
+		}
+	}
 	return {
 		...monitor,
 		title: `${isAgentPrompt ? "Effective Prompt" : "Prompt Preview"} · ${monitor.title}`,
 		channel: isAgentPrompt
 			? "effective Pi system prompt"
 			: "current Pi system prompt preview",
-		status: isAgentPrompt
-			? "captured after the latest agent start"
-			: "captured before an agent run",
-		statusColor: "success",
+		status,
+		statusColor,
 		content: captured.content,
+		presenceExpected,
 		note: [
 			monitor.status,
 			isAgentPrompt
@@ -175,6 +212,99 @@ function showCapturedSystemPrompt(
 			.filter(Boolean)
 			.join(" "),
 	};
+}
+
+interface PromptSourceItemOptions {
+	id: string;
+	label: string;
+	state: string;
+	detail: string;
+	channel: string;
+	status: string;
+	content: string;
+	note?: string;
+}
+
+function createPromptSourceItem(
+	snapshot: ManagerSnapshot,
+	options: PromptSourceItemOptions,
+): ViewItem {
+	return {
+		id: options.id,
+		label: options.label,
+		state: options.state,
+		detail: options.detail,
+		monitor: showCapturedSystemPrompt(
+			snapshot,
+			{
+				title: `Prompt Source · ${options.label}`,
+				channel: options.channel,
+				status: options.status,
+				statusColor: "success",
+				content: options.content,
+				highlightTarget: {
+					kind: "text-span",
+					text: options.content,
+				},
+				note: options.note,
+			},
+			{
+				showFullPrompt: true,
+				expectation: {
+					shouldBePresent: true,
+					stateLabel: "active",
+				},
+			},
+		),
+	};
+}
+
+function getPromptSourceItems(snapshot: ManagerSnapshot): ViewItem[] {
+	const items: ViewItem[] = [];
+	if (snapshot.customSystemPrompt) {
+		items.push(
+			createPromptSourceItem(snapshot, {
+				id: "custom-system-prompt",
+				label: "Custom System Prompt",
+				state: "active · read-only",
+				detail:
+					"Pi custom system prompt · source path unavailable through Extension API",
+				channel: "system prompt base",
+				status: "active · included by Pi",
+				content: snapshot.customSystemPrompt,
+				note: "Presence is verified by content because Pi does not expose the source path through Extension API.",
+			}),
+		);
+	}
+	if (snapshot.appendedSystemPrompt) {
+		items.push(
+			createPromptSourceItem(snapshot, {
+				id: "appended-system-prompt",
+				label: "Appended System Prompt",
+				state: "active · read-only",
+				detail:
+					"Pi appended system prompt · merged source text; source paths unavailable through Extension API",
+				channel: "system prompt append section",
+				status: "active · included by Pi",
+				content: snapshot.appendedSystemPrompt,
+				note: "This may combine APPEND_SYSTEM.md, CLI, or SDK inputs; Pi exposes only the merged text.",
+			}),
+		);
+	}
+	if (snapshot.presetInstructions) {
+		items.push(
+			createPromptSourceItem(snapshot, {
+				id: "preset-instructions",
+				label: "Preset Instructions",
+				state: `active · controlled by preset ${snapshot.presetName ?? "unknown"}`,
+				detail: `Config Manager preset · ${snapshot.presetName ?? "unknown"}`,
+				channel: "system prompt preset append",
+				status: "active · appended by Config Manager",
+				content: snapshot.presetInstructions,
+			}),
+		);
+	}
+	return items;
 }
 
 function renderPane(
@@ -323,12 +453,14 @@ class ConfigManagerView implements Component, Focusable {
 			safeWidth,
 		);
 		if (safeWidth < 4) return [title];
-		const targetLabel =
-			this.tab === "extensions"
-				? this.theme.fg("success", "View/Edit: Pi settings")
-				: snapshot.presetName
-					? `${this.theme.fg("accent", "View: Effective")} · ${this.theme.fg("warning", `Edit: Session · ${snapshot.presetName}`)}`
-					: `${this.theme.fg("accent", "View: Effective")} · ${this.theme.fg("success", "Edit: Global")}`;
+		let targetLabel: string;
+		if (this.tab === "extensions") {
+			targetLabel = this.theme.fg("success", "View/Edit: Pi settings");
+		} else if (snapshot.presetName) {
+			targetLabel = `${this.theme.fg("accent", "View: Effective")} · ${this.theme.fg("warning", `Edit: Session · ${snapshot.presetName}`)}`;
+		} else {
+			targetLabel = `${this.theme.fg("accent", "View: Effective")} · ${this.theme.fg("success", "Edit: Global")}`;
+		}
 		const constraintIds = Array.from(
 			new Set(
 				Array.from(snapshot.runtimeToolControls.values()).map(
@@ -355,10 +487,7 @@ class ConfigManagerView implements Component, Focusable {
 			this.tab === "extensions"
 				? this.theme.fg("dim", "Constraints: n/a")
 				: constraintIds.length > 0
-					? this.theme.fg(
-							"warning",
-							`Constraints: ${constraintIds.join(", ")}`,
-						)
+					? this.theme.fg("warning", `Constraints: ${constraintIds.join(", ")}`)
 					: this.theme.fg("dim", "Constraints: none"),
 			safeWidth,
 		);
@@ -475,56 +604,61 @@ class ConfigManagerView implements Component, Focusable {
 
 		const monitor = item.monitor;
 		const safeWidth = Math.max(1, width);
-		const rows: string[] = [];
+		const headerRows: string[] = [];
+		const contentRows: string[] = [];
 		const highlightedLines = monitor.highlightTarget
 			? getHighlightedLineIndexes(monitor.content, monitor.highlightTarget)
 			: new Set<number>();
 		const hasHighlight =
 			!monitor.highlightTarget ||
-			(monitor.highlightTarget.kind !== "skill-fields" &&
-				monitor.highlightTarget.lines.length === 0) ||
-			highlightedLines.size > 0;
-		let highlightedRow = -1;
-		const addWrapped = (line: string) => {
-			rows.push(...wrapTextWithAnsi(line, safeWidth));
+			promptContainsTarget(monitor.content, monitor.highlightTarget);
+		let statusIcon = "○";
+		if (monitor.statusColor === "success") statusIcon = "●";
+		else if (monitor.statusColor === "error") statusIcon = "!";
+		const addHeader = (line: string) => {
+			headerRows.push(...wrapTextWithAnsi(line, safeWidth));
 		};
-		addWrapped(
-			this.theme.fg(
-				monitor.statusColor,
-				` ${monitor.statusColor === "success" ? "●" : "○"} ${monitor.status}`,
-			),
+		addHeader(
+			this.theme.fg(monitor.statusColor, ` ${statusIcon} ${monitor.status}`),
 		);
-		addWrapped(this.theme.fg("dim", ` channel: ${monitor.channel}`));
-		addWrapped(
+		addHeader(this.theme.fg("dim", ` channel: ${monitor.channel}`));
+		addHeader(
 			this.theme.fg("dim", ` source: ${item.detail.replace(/\n/g, " · ")}`),
 		);
 		if (monitor.note) {
-			addWrapped(this.theme.fg("warning", ` note: ${monitor.note}`));
+			addHeader(this.theme.fg("warning", ` note: ${monitor.note}`));
 		}
-		if (!hasHighlight) {
-			addWrapped(
+		if (!hasHighlight && monitor.presenceExpected !== false) {
+			addHeader(
 				this.theme.fg(
 					"warning",
 					" selected resource was not found in this captured system prompt",
 				),
 			);
 		}
-		rows.push("");
-		for (const [lineIndex, rawLine] of monitor.content
-			.split("\n")
-			.entries()) {
+		headerRows.push("");
+
+		let highlightedRow = -1;
+		for (const [lineIndex, rawLine] of monitor.content.split("\n").entries()) {
 			const highlighted = rawLine.length > 0 && highlightedLines.has(lineIndex);
-			if (highlighted && highlightedRow < 0) highlightedRow = rows.length;
+			if (highlighted && highlightedRow < 0) {
+				highlightedRow = contentRows.length;
+			}
 			const styled = rawLine
 				? highlighted
 					? this.theme.bg("selectedBg", this.theme.fg("text", ` ${rawLine}`))
 					: this.theme.fg("accent", ` ${rawLine}`)
 				: "";
-			addWrapped(styled);
+			contentRows.push(...wrapTextWithAnsi(styled, safeWidth));
 		}
 
-		const viewportHeight = Math.max(1, height - (rows.length > height ? 1 : 0));
-		const maxScroll = Math.max(0, rows.length - viewportHeight);
+		if (headerRows.length >= height) return headerRows.slice(0, height);
+		let viewportHeight = Math.max(1, height - headerRows.length);
+		let maxScroll = Math.max(0, contentRows.length - viewportHeight);
+		if (maxScroll > 0) {
+			viewportHeight = Math.max(1, viewportHeight - 1);
+			maxScroll = Math.max(0, contentRows.length - viewportHeight);
+		}
 		if (
 			this.monitorItemId !== item.id ||
 			this.monitorContent !== monitor.content
@@ -537,28 +671,35 @@ class ConfigManagerView implements Component, Focusable {
 			);
 		}
 		this.monitorScroll = Math.min(this.monitorScroll, maxScroll);
-		const visible = rows.slice(
-			this.monitorScroll,
-			this.monitorScroll + viewportHeight,
-		);
+		const visible = [
+			...headerRows,
+			...contentRows.slice(
+				this.monitorScroll,
+				this.monitorScroll + viewportHeight,
+			),
+		];
 		if (maxScroll > 0) {
 			visible.push(
 				truncateToWidth(
 					this.theme.fg(
 						"dim",
-						` ↑/↓ · ${this.monitorScroll + 1}-${Math.min(rows.length, this.monitorScroll + viewportHeight)}/${rows.length}`,
+						` ↑/↓ · ${this.monitorScroll + 1}-${Math.min(contentRows.length, this.monitorScroll + viewportHeight)}/${contentRows.length}`,
 					),
 					safeWidth,
 					"",
 				),
 			);
 		}
-		return visible;
+		return visible.slice(0, height);
 	}
 
 	private allItems(): ViewItem[] {
 		const snapshot = this.getSnapshot();
 		if (this.tab === "overview") {
+			const promptSourceCount =
+				Number(Boolean(snapshot.customSystemPrompt)) +
+				Number(Boolean(snapshot.appendedSystemPrompt)) +
+				Number(Boolean(snapshot.presetInstructions));
 			return [
 				{
 					id: "tools",
@@ -577,9 +718,10 @@ class ConfigManagerView implements Component, Focusable {
 					id: "contexts",
 					label: "Contexts",
 					state: snapshot.contextsKnown
-						? `${snapshot.enabledContexts.size}/${snapshot.contexts.length}`
+						? `${snapshot.enabledContexts.size}/${snapshot.contexts.length} files · ${promptSourceCount} prompt sources`
 						: "loading",
-					detail: "Pi-loaded context files exposed to the model.",
+					detail:
+						"Toggle Pi-loaded context files and inspect read-only system prompt sources.",
 				},
 				{
 					id: "extensions",
@@ -670,10 +812,10 @@ class ConfigManagerView implements Component, Focusable {
 												.filter(Boolean)
 												.map((line) => `- ${line}`),
 										],
-								  }
+									}
 								: undefined,
 						},
-						active,
+						{ showFullPrompt: active },
 					),
 				};
 			});
@@ -686,13 +828,16 @@ class ConfigManagerView implements Component, Focusable {
 				const readAvailable = snapshot.activeTools.has("read");
 				const catalogVisible =
 					enabled && readAvailable && !skill.disableModelInvocation;
-				const status = !enabled
-					? "disabled by current policy"
-					: skill.disableModelInvocation
-						? "manual invocation only · omitted from the skill catalog"
-						: !readAvailable
-							? "enabled, but read is inactive · catalog omitted"
-							: "enabled · expected in the next base system prompt";
+				let presenceStateLabel = "catalog omitted";
+				if (!enabled) presenceStateLabel = "disabled";
+				else if (catalogVisible) presenceStateLabel = "enabled";
+				let status = "enabled · expected in the next base system prompt";
+				if (!enabled) status = "disabled by current policy";
+				else if (skill.disableModelInvocation) {
+					status = "manual invocation only · omitted from the skill catalog";
+				} else if (!readAvailable) {
+					status = "enabled, but read is inactive · catalog omitted";
+				}
 				return {
 					id: skill.name,
 					label: skill.name,
@@ -728,12 +873,18 @@ class ConfigManagerView implements Component, Focusable {
 								skillName: skill.name,
 							},
 						},
-						catalogVisible,
+						{
+							showFullPrompt: true,
+							expectation: {
+								shouldBePresent: catalogVisible,
+								stateLabel: presenceStateLabel,
+							},
+						},
 					),
 				};
 			});
-		if (this.tab === "contexts")
-			return snapshot.contexts.map((context) => {
+		if (this.tab === "contexts") {
+			const contextItems = snapshot.contexts.map((context) => {
 				const enabled = snapshot.enabledContexts.has(context.path);
 				const projectLocked =
 					!snapshot.presetName &&
@@ -757,14 +908,22 @@ class ConfigManagerView implements Component, Focusable {
 							note: "This previews Pi's base prompt; later extension prompt rewrites can still differ.",
 							content: formatContextSection([context]).trim(),
 							highlightTarget: {
-								kind: "contains-lines",
+								kind: "contains-lines" as const,
 								lines: [`<project_instructions path="${context.path}">`],
 							},
 						},
-						enabled,
+						{
+							showFullPrompt: true,
+							expectation: {
+								shouldBePresent: enabled,
+								stateLabel: enabled ? "enabled" : "disabled",
+							},
+						},
 					),
 				};
 			});
+			return [...getPromptSourceItems(snapshot), ...contextItems];
+		}
 		return snapshot.extensions.map((extension) => {
 			const staged = this.stagedExtensions.get(extension.path);
 			const enabled = staged?.enabled ?? extension.enabled;
@@ -825,10 +984,12 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	let toolsInventoryUpdating = false;
 	let settleTimer: ReturnType<typeof setTimeout> | undefined;
 	let requestHudRender: (() => void) | undefined;
-	const promptWarnings = new Set<"skills" | "contexts">();
 	let snapshot: ManagerSnapshot = {
 		ready: false,
 		customPromptActive: false,
+		customSystemPrompt: undefined,
+		appendedSystemPrompt: undefined,
+		presetInstructions: undefined,
 		contextsKnown: false,
 		extensionsKnown: false,
 		tools: [],
@@ -860,7 +1021,8 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	function restoreSession(ctx: ExtensionContext): void {
 		sessionState = cloneSessionState(DEFAULT_SESSION_STATE);
 		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type !== "custom" || entry.customType !== SESSION_ENTRY) continue;
+			if (entry.type !== "custom" || entry.customType !== SESSION_ENTRY)
+				continue;
 			const restored = normalizeSessionState(entry.data);
 			if (restored) sessionState = restored;
 		}
@@ -876,7 +1038,26 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			runtimeToolControls: policy.resolveRuntimeToolControls(),
 		};
 		requestHudRender?.();
+		emitStateChanged();
+	}
+
+	function emitStateChanged(): void {
 		pi.events.emit("config-manager:state-changed", publicSnapshot());
+	}
+
+	function refreshPromptPreview(ctx: ExtensionContext): void {
+		if (snapshot.effectiveSystemPrompt?.source === "agent-start") return;
+		const currentPrompt = ctx.getSystemPrompt();
+		snapshot = {
+			...snapshot,
+			effectiveSystemPrompt: currentPrompt
+				? {
+						content: currentPrompt,
+						capturedAt: Date.now(),
+						source: "command",
+					}
+				: undefined,
+		};
 	}
 
 	function getManagerSnapshot(): ManagerSnapshot {
@@ -899,9 +1080,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				runtimePolicyDirty = false;
 				if (hasAppliedTools) {
 					policy.observeExternalTools(
-						pi
-							.getActiveTools()
-							.filter((name) => !lastAppliedTools.has(name)),
+						pi.getActiveTools().filter((name) => !lastAppliedTools.has(name)),
 					);
 				}
 				const allTools = pi.getAllTools();
@@ -928,13 +1107,15 @@ export default function piConfigManager(pi: ExtensionAPI) {
 
 	function getPresetLabel(): string {
 		const mode = activePresetName ?? "default";
-		return sessionState.preset?.customTools
-			? `${mode} (custom tools)`
-			: mode;
+		return sessionState.preset?.customTools ? `${mode} (custom tools)` : mode;
 	}
 
 	function updatePresetStatus(ctx: ExtensionContext): void {
-		snapshot = { ...snapshot, presetName: activePresetName };
+		snapshot = {
+			...snapshot,
+			presetName: activePresetName,
+			presetInstructions: activePreset?.instructions,
+		};
 		ctx.ui.setStatus("preset", undefined);
 		ctx.ui.setWidget("preset", undefined);
 		activePresetEditor?.requestRender();
@@ -1077,7 +1258,10 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	async function showPresetSelector(ctx: ExtensionContext): Promise<void> {
 		const names = Object.keys(presets);
 		if (names.length === 0) {
-			ctx.ui.notify("No presets defined in global or project presets.json", "warning");
+			ctx.ui.notify(
+				"No presets defined in global or project presets.json",
+				"warning",
+			);
 			return;
 		}
 		const items: SelectItem[] = names.flatMap((name) => {
@@ -1100,7 +1284,9 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		const result = await ctx.ui.custom<string | null>(
 			(tui, theme, _keybindings, done) => {
 				const container = new Container();
-				container.addChild(new DynamicBorder((text) => theme.fg("accent", text)));
+				container.addChild(
+					new DynamicBorder((text) => theme.fg("accent", text)),
+				);
 				container.addChild(
 					new Text(theme.fg("accent", theme.bold("Select Preset"))),
 				);
@@ -1117,7 +1303,9 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				container.addChild(
 					new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel")),
 				);
-				container.addChild(new DynamicBorder((text) => theme.fg("accent", text)));
+				container.addChild(
+					new DynamicBorder((text) => theme.fg("accent", text)),
+				);
 				return {
 					render: (width: number) => container.render(width),
 					invalidate: () => container.invalidate(),
@@ -1143,13 +1331,17 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	async function cyclePreset(ctx: ExtensionContext): Promise<void> {
 		const names = Object.keys(presets).sort((a, b) => a.localeCompare(b));
 		if (names.length === 0) {
-			ctx.ui.notify("No presets defined in global or project presets.json", "warning");
+			ctx.ui.notify(
+				"No presets defined in global or project presets.json",
+				"warning",
+			);
 			return;
 		}
 		const cycle = ["(none)", ...names];
 		const current = activePresetName ?? "(none)";
 		const currentIndex = cycle.indexOf(current);
-		const next = cycle[currentIndex < 0 ? 0 : (currentIndex + 1) % cycle.length];
+		const next =
+			cycle[currentIndex < 0 ? 0 : (currentIndex + 1) % cycle.length];
 		if (!next) return;
 		if (next === "(none)") {
 			await clearPreset(ctx);
@@ -1183,6 +1375,8 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			...snapshot,
 			ready: true,
 			customPromptActive: Boolean(options.customPrompt),
+			customSystemPrompt: options.customPrompt,
+			appendedSystemPrompt: options.appendSystemPrompt,
 			toolSnippets,
 			skills,
 			enabledSkills: policy.resolveEnabledSkills(skills),
@@ -1201,6 +1395,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			);
 			snapshot = { ...snapshot, extensionsKnown: true, extensions };
 			requestHudRender?.();
+			emitStateChanged();
 		} catch (error) {
 			ctx.ui.notify(
 				`Could not resolve extensions: ${error instanceof Error ? error.message : String(error)}`,
@@ -1234,6 +1429,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			enabledSkills: policy.resolveEnabledSkills(skills),
 		};
 		requestHudRender?.();
+		emitStateChanged();
 	}
 
 	function scheduleSettledRefresh(ctx: ExtensionContext): void {
@@ -1307,6 +1503,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			};
 			persistSession();
 			requestHudRender?.();
+			emitStateChanged();
 			return;
 		}
 		if (tab === "contexts") {
@@ -1328,6 +1525,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			};
 			persistSession();
 			requestHudRender?.();
+			emitStateChanged();
 		}
 	}
 
@@ -1362,12 +1560,12 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		}
 		policy.setSettings(globalSettings, projectSettings);
 		saveGlobalSettings(globalSettings);
-		updateToolsInventory();
 		snapshot = {
 			...snapshot,
 			enabledSkills: policy.resolveEnabledSkills(snapshot.skills),
 			enabledContexts: policy.resolveEnabledContexts(snapshot.contexts),
 		};
+		updateToolsInventory();
 		ctx.ui.notify(
 			`Global ${kind} setting updated: ${name} ${enabled ? "enabled" : "disabled"}`,
 			"info",
@@ -1383,21 +1581,9 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			ctx.ui.notify("Pi Config Manager requires TUI mode", "error");
 			return;
 		}
-		if (!snapshot.effectiveSystemPrompt) {
-			const currentPrompt = ctx.getSystemPrompt();
-			if (currentPrompt) {
-				snapshot = {
-					...snapshot,
-					effectiveSystemPrompt: {
-						content: currentPrompt,
-						capturedAt: Date.now(),
-						source: "command",
-					},
-				};
-			}
-		}
 		updatePromptInventory(ctx.getSystemPromptOptions());
 		updateToolsInventory();
+		refreshPromptPreview(ctx);
 		await refreshExtensions(ctx);
 		const staged = new Map<string, ExtensionChange>();
 		const action = await ctx.ui.custom<"close" | "save">(
@@ -1430,7 +1616,11 @@ export default function piConfigManager(pi: ExtensionAPI) {
 							}
 							const current = staged.get(id)?.enabled ?? resource.enabled;
 							staged.set(id, { resource, enabled: !current });
-						} else if (tab !== "overview") {
+						} else if (
+							tab === "tools" ||
+							tab === "skills" ||
+							tab === "contexts"
+						) {
 							const runtimeControl =
 								tab === "tools"
 									? snapshot.runtimeToolControls.get(id)
@@ -1454,8 +1644,6 @@ export default function piConfigManager(pi: ExtensionAPI) {
 								);
 							} else if (activePresetName) {
 								toggleSessionResource(tab, id, ctx);
-								updatePromptInventory(ctx.getSystemPromptOptions());
-								updateToolsInventory();
 							} else {
 								setGlobalResource(
 									tab,
@@ -1464,6 +1652,9 @@ export default function piConfigManager(pi: ExtensionAPI) {
 									ctx,
 								);
 							}
+							updatePromptInventory(ctx.getSystemPromptOptions());
+							updateToolsInventory();
+							refreshPromptPreview(ctx);
 						}
 						tui.requestRender();
 					},
@@ -1564,7 +1755,8 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("config-manager", {
-		description: "Manage Pi tools, skills, contexts, and extensions",
+		description:
+			"Manage Pi tools, skills, contexts, prompt sources, and extensions",
 		handler: async (_args, ctx) => showManager("overview", ctx),
 	});
 	registerResourceCommand("tools", "tools", "tools");
@@ -1615,9 +1807,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		const toolNames = (value: unknown): string[] =>
 			Array.isArray(value)
 				? unique(
-						value.filter(
-							(item): item is string => typeof item === "string",
-						),
+						value.filter((item): item is string => typeof item === "string"),
 					)
 				: [];
 		const layer: RuntimeLayer = {
@@ -1637,7 +1827,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		if (policyPhase === "ready") updateToolsInventory();
 	});
 	pi.events.on("config-manager:request-snapshot", () => {
-		pi.events.emit("config-manager:state-changed", publicSnapshot());
+		emitStateChanged();
 	});
 
 	pi.on("input", (event, ctx) => {
@@ -1679,27 +1869,23 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			!event.systemPromptOptions.selectedTools ||
 			event.systemPromptOptions.selectedTools.includes("read");
 		if (originalSkills && systemPrompt.includes(originalSkills)) {
-			systemPrompt = systemPrompt.replace(originalSkills, filteredSkills);
+			systemPrompt = systemPrompt.replaceAll(originalSkills, filteredSkills);
 		} else if (
 			readAvailable &&
 			originalSkills &&
-			filteredSkills !== originalSkills &&
-			!promptWarnings.has("skills")
+			filteredSkills !== originalSkills
 		) {
-			promptWarnings.add("skills");
 			ctx.ui.notify(
 				"Disabled Skills could not be removed from this custom system prompt; leaving the prompt unchanged.",
 				"warning",
 			);
 		}
 		if (originalContexts && systemPrompt.includes(originalContexts)) {
-			systemPrompt = systemPrompt.replace(originalContexts, filteredContexts);
-		} else if (
-			originalContexts &&
-			filteredContexts !== originalContexts &&
-			!promptWarnings.has("contexts")
-		) {
-			promptWarnings.add("contexts");
+			systemPrompt = systemPrompt.replaceAll(
+				originalContexts,
+				filteredContexts,
+			);
+		} else if (originalContexts && filteredContexts !== originalContexts) {
 			ctx.ui.notify(
 				"Disabled Context Files could not be removed from this custom system prompt; leaving the prompt unchanged.",
 				"warning",
@@ -1729,7 +1915,6 @@ export default function piConfigManager(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		policyPhase = "initializing";
-		promptWarnings.clear();
 		const initialTools = pi.getActiveTools();
 		lastAppliedTools = new Set();
 		hasAppliedTools = false;
@@ -1758,6 +1943,9 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			...snapshot,
 			ready: false,
 			customPromptActive: false,
+			customSystemPrompt: undefined,
+			appendedSystemPrompt: undefined,
+			presetInstructions: activePreset?.instructions,
 			effectiveSystemPrompt: undefined,
 			contextsKnown: false,
 			extensionsKnown: false,

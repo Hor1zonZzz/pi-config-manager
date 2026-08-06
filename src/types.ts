@@ -92,6 +92,9 @@ export interface EffectiveSystemPrompt {
 export interface ManagerSnapshot {
 	ready: boolean;
 	customPromptActive: boolean;
+	customSystemPrompt?: string;
+	appendedSystemPrompt?: string;
+	presetInstructions?: string;
 	contextsKnown: boolean;
 	extensionsKnown: boolean;
 	tools: ToolRecord[];

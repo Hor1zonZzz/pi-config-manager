@@ -10,6 +10,10 @@ export type PromptHighlightTarget =
 	| {
 			kind: "skill-fields";
 			skillName: string;
+	  }
+	| {
+			kind: "text-span";
+			text: string;
 	  };
 
 const SKILL_OPEN_TAG = "<skill>";
@@ -93,10 +97,7 @@ function skillFieldLineIndexes(
 		const skillStart = content.indexOf(SKILL_OPEN_TAG, cursor);
 		if (skillStart < 0) break;
 		const skillContentStart = skillStart + SKILL_OPEN_TAG.length;
-		const skillCloseStart = content.indexOf(
-			SKILL_CLOSE_TAG,
-			skillContentStart,
-		);
+		const skillCloseStart = content.indexOf(SKILL_CLOSE_TAG, skillContentStart);
 		if (skillCloseStart < 0) break;
 		const skillEnd = skillCloseStart + SKILL_CLOSE_TAG.length;
 		const block = content.slice(skillContentStart, skillCloseStart);
@@ -134,14 +135,30 @@ export function getHighlightedLineIndexes(
 		return skillFieldLineIndexes(content, target.skillName);
 	}
 
+	if (target.kind === "text-span") {
+		const highlighted = new Set<number>();
+		if (target.text.length === 0) return highlighted;
+		const starts = lineStarts(content);
+		for (let cursor = 0; cursor < content.length; ) {
+			const start = content.indexOf(target.text, cursor);
+			if (start < 0) break;
+			addSpanLineIndexes(
+				highlighted,
+				starts,
+				start,
+				start + target.text.length,
+			);
+			cursor = start + target.text.length;
+		}
+		return highlighted;
+	}
+
 	if (target.kind === "exact-lines") {
 		const exactLines = new Set(target.lines.map((line) => line.trim()));
 		return new Set(
 			content
 				.split("\n")
-				.flatMap((line, index) =>
-					exactLines.has(line.trim()) ? [index] : [],
-				),
+				.flatMap((line, index) => (exactLines.has(line.trim()) ? [index] : [])),
 		);
 	}
 
@@ -153,5 +170,23 @@ export function getHighlightedLineIndexes(
 					? [index]
 					: [],
 			),
+	);
+}
+
+export function promptContainsTarget(
+	content: string,
+	target: PromptHighlightTarget,
+): boolean {
+	if (target.kind === "skill-fields" || target.kind === "text-span") {
+		return getHighlightedLineIndexes(content, target).size > 0;
+	}
+	if (target.lines.length === 0) return true;
+	const lines = content.split("\n");
+	return target.lines.every((highlight) =>
+		lines.some((line) =>
+			target.kind === "exact-lines"
+				? line.trim() === highlight.trim()
+				: line.includes(highlight),
+		),
 	);
 }

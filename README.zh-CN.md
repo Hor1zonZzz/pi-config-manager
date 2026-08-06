@@ -1,6 +1,6 @@
 # Pi Config Manager
 
-在一个可搜索的 TUI 浮层中管理 Pi 的工具、技能、上下文文件与扩展。
+在一个可搜索的 TUI 浮层中管理 Pi 的工具、技能、上下文文件、提示词来源与扩展。
 
 [English](README.md) | 简体中文
 
@@ -8,7 +8,7 @@ Pi Config Manager 是 [Pi Coding Agent](https://github.com/earendil-works/pi) �
 
 ## 主要特性
 
-- 在一个界面中管理 **Tools、Skills、Context Files 和 Extensions**
+- 在一个界面中管理 **Tools、Skills、Context Files、Prompt Sources 和 Extensions**
 - 显示当前真正提供给模型的 Effective 资源状态
 - 可搜索、全键盘操作的浮层，并保留当前对话作为背景
 - 持久化的 **Global** 资源设置，Preset 则隔离在当前 Session 中
@@ -81,7 +81,7 @@ pi -e npm:pi-config-manager
 | `/config-manager` | 打开统一概览 |
 | `/tools` | 打开 Tools 页 |
 | `/skills` | 打开 Skills 页 |
-| `/contexts` | 打开 Context Files 页 |
+| `/contexts` | 管理上下文文件并查看系统提示词来源 |
 | `/extensions` | 打开 Extensions 页 |
 | `/preset` | 选择或清除命名 Preset |
 | `/preset <名称>` | 直接激活命名 Preset |
@@ -123,9 +123,11 @@ pi -e npm:pi-config-manager
 
 已禁用的技能会从 Pi 标准系统提示词的技能目录中移除。调用已禁用的 `/skill:<name>` 命令时，也会显示通知并阻止展开。
 
-### Context Files
+### Contexts 与 Prompt Sources
 
-已禁用的上下文文件会从 Pi 标准的 `project_context` 提示词区段中移除。该设置只控制模型可见的提示词内容，**不会**阻止工具直接读取一个已知文件路径。
+Contexts 页会把 Pi 的自定义系统提示词、合并后的追加系统提示词和当前预设指令作为只读条目，与可单独切换的上下文文件放在一起。已禁用的上下文文件会从 Pi 标准的 `project_context` 提示词区段中移除。该设置只控制模型可见的提示词内容，**不会**阻止工具直接读取一个已知文件路径。
+
+Pi 公开的 Extension API 不提供自定义和追加提示词的来源路径，因此 Config Manager 使用通用标签，而不会假定内容一定来自 `SYSTEM.md` 或 `APPEND_SYSTEM.md`。
 
 ### Extensions
 
@@ -139,10 +141,10 @@ pi -e npm:pi-config-manager
 
 - **Tools：**描述、参数 schema、prompt snippet 与 prompt guidelines
 - **Skills：**该技能在系统提示词目录中的条目
-- **Context Files：**完整的 `project_context` 区块
+- **Contexts：**自定义系统提示词、合并后的追加提示词、预设指令，以及每个上下文文件的 `project_context` 贡献
 - **Extensions：**来源、作用域、包来源类型与路径信息
 
-第一次代理运行前，Monitor 使用 Pi 当前的提示词预览。运行开始后，它会显示在 `agent_start` 捕获的有效系统提示词，并在其中高亮所选资源。在管理器打开期间做出的策略变更，会在下一次代理运行后反映到捕获的提示词中。
+第一次代理运行前，Monitor 会在每次打开管理器时刷新 Pi 当前的提示词预览。运行开始后，它会显示在 `agent_start` 捕获的有效系统提示词，在提示词内容滚动时保持状态信息可见，并根据该提示词验证启用和禁用的 Skills 与 Context Files。若后置扩展重新注入了已禁用资源，界面会报告 `FOUND IN EFFECTIVE PROMPT`。在管理器打开期间做出的策略变更，会在下一次代理运行后反映到捕获的提示词中。
 
 终端较窄时，Config Manager 会退化为不带 Monitor 的资源列表。
 
@@ -248,7 +250,7 @@ pi.events.emit("config-manager:layer-clear", {
 
 - Pi 扩展拥有当前用户的完整系统权限，安装第三方包前请先审查源码。
 - Config Manager 是提示词/资源策略工具，不是文件系统或进程沙箱。
-- 技能和上下文过滤依赖 Pi 的标准提示词区段。如果自定义系统提示词删除或重写了这些区段，Config Manager 会保留原提示词并警告用户。
+- 技能和上下文过滤依赖 Pi 的标准提示词区段。如果自定义系统提示词删除或重写了这些区段，Config Manager 会保留原提示词，并在每个受影响的运行中提醒用户。有效提示词验证器会报告在 `agent_start` 后仍然可见的禁用资源；这属于检测能力，不是安全沙箱。
 - 可视化管理器只支持 TUI 模式；RPC、JSON 和 print 模式不能打开浮层。
 - 扩展变更需要重新加载 Pi。
 

@@ -1,6 +1,6 @@
 # Pi Config Manager
 
-Manage Pi tools, skills, context files, and extensions from one searchable TUI overlay.
+Manage Pi tools, skills, context files, prompt sources, and extensions from one searchable TUI overlay.
 
 English | [简体中文](README.zh-CN.md)
 
@@ -8,7 +8,7 @@ Pi Config Manager is a resource-policy extension for [Pi Coding Agent](https://g
 
 ## Highlights
 
-- One UI for **Tools**, **Skills**, **Context Files**, and **Extensions**
+- One UI for **Tools**, **Skills**, **Context Files**, **Prompt Sources**, and **Extensions**
 - Effective-state resource display showing what is currently available to the model
 - Searchable, keyboard-driven overlay that keeps the current conversation visible
 - Persistent **Global** resource settings, with presets isolated to the current session
@@ -81,7 +81,7 @@ Keybinding-aware actions follow Pi's configured TUI keybindings.
 | `/config-manager` | Open the unified overview |
 | `/tools` | Open the Tools tab |
 | `/skills` | Open the Skills tab |
-| `/contexts` | Open the Context Files tab |
+| `/contexts` | Manage context files and inspect system prompt sources |
 | `/extensions` | Open the Extensions tab |
 | `/preset` | Select or clear a named preset |
 | `/preset <name>` | Activate a named preset directly |
@@ -123,9 +123,11 @@ Unconstrained tool changes apply immediately through `pi.setActiveTools()`. Conf
 
 Disabled skills are removed from Pi's standard system-prompt skill catalog. Invoking a disabled `/skill:<name>` command is also blocked with a notification.
 
-### Context Files
+### Contexts and Prompt Sources
 
-Disabled context files are removed from Pi's standard `project_context` prompt block. This controls model-visible prompt content; it does **not** prevent tools from reading a known file path.
+The Contexts tab lists Pi's custom system prompt, merged appended system prompt, and active preset instructions as read-only entries alongside individually toggleable context files. Disabled context files are removed from Pi's standard `project_context` prompt block. This controls model-visible prompt content; it does **not** prevent tools from reading a known file path.
+
+Pi's public Extension API does not expose source paths for custom or appended prompt text, so Config Manager labels those entries generically instead of assuming they came from `SYSTEM.md` or `APPEND_SYSTEM.md`.
 
 ### Extensions
 
@@ -139,10 +141,10 @@ On wide terminals, the overlay displays resources on the left and a Context Moni
 
 - **Tools:** description, parameter schema, prompt snippet, and prompt guidelines
 - **Skills:** the skill's system-prompt catalog entry
-- **Context Files:** the complete `project_context` block
+- **Contexts:** custom system prompt, merged appended prompt, preset instructions, and each context file's `project_context` contribution
 - **Extensions:** source, scope, package origin, and path details
 
-Before the first agent run, the monitor uses Pi's current prompt preview. After a run starts, it shows the effective system prompt captured at `agent_start` and highlights the selected resource when present. Policy changes made while the manager is open appear in the captured prompt after the next agent run.
+Before the first agent run, the monitor refreshes Pi's current prompt preview whenever the manager opens. After a run starts, it shows the effective system prompt captured at `agent_start`, keeps status metadata visible while prompt content scrolls, and verifies enabled and disabled Skills and Context Files against that captured prompt. A disabled resource that is reintroduced by a later extension is reported as `FOUND IN EFFECTIVE PROMPT`. Policy changes made while the manager is open appear in the captured prompt after the next agent run.
 
 On narrow terminals, Config Manager falls back to the resource list without the monitor pane.
 
@@ -248,7 +250,7 @@ The former `preset:tools-changed`, `preset:skills-changed`, and `config-manager:
 
 - Pi extensions run with the user's full system permissions. Review third-party packages before installing them.
 - Config Manager is a prompt/resource policy tool, not a filesystem or process sandbox.
-- Skill and context filtering expects Pi's standard prompt sections. If a custom system prompt removes or rewrites those sections, Config Manager leaves the prompt unchanged and warns the user.
+- Skill and context filtering expects Pi's standard prompt sections. If a custom system prompt removes or rewrites those sections, Config Manager leaves the prompt unchanged and warns on every affected run. The effective-prompt verifier reports disabled resources that remain visible after `agent_start`; this is detection, not a security sandbox.
 - The visual manager requires TUI mode. In RPC, JSON, and print modes, the overlay is unavailable.
 - Extension changes require a Pi reload.
 
