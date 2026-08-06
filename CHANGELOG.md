@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Filter every duplicate standard skill/context prompt section and report filtering failures on every affected run.
 - Generalize Pi package-resource resolution and settings writes across extensions, skills, prompt templates, and themes while retaining source metadata.
 - Split the manager UI, prompt monitoring, resource view models, prompt policy, and behavior tests into focused modules without changing the public API.
+- Decompose resource item rendering, TUI input/layout, toggle planning, package-setting writes, inventory collection, and policy-state updates into focused helpers.
 
 ## [0.2.0] - 2026-08-02
 

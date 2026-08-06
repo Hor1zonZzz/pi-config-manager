@@ -1,14 +1,16 @@
-import { basename, dirname } from "node:path";
-import {
-	getAgentDir,
-	loadSkills,
-	type BuildSystemPromptOptions,
-	type ExtensionAPI,
-	type ExtensionCommandContext,
-	type ExtensionContext,
+import type {
+	BuildSystemPromptOptions,
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
-import { resolvedSourceInfo } from "./resource-view-items";
+import {
+	buildLoadedSkillInventory,
+	buildPromptResourceInventory,
+	buildPublicSnapshot,
+	buildUnloadedSkillInventory,
+} from "./resource-inventory";
 import { resolvePackageResources } from "./extensions";
 import {
 	installResourceHud,
@@ -16,6 +18,15 @@ import {
 	selectPreset,
 } from "./manager-ui";
 import { PolicyManager } from "./policy-manager";
+import {
+	isProjectResourceDisabled,
+	isResourceEnabled,
+	resetSessionResourceOverrides,
+	toggleSessionResourceOverride,
+	uniqueSorted,
+	updateGlobalResourceSettings,
+	type ToggleableResourceTab,
+} from "./resource-policy-state";
 import { applySystemPromptPolicy } from "./system-prompt-policy";
 import { installPresetEditor, type PresetBorderEditor } from "./preset-editor";
 import { loadPresets, type Preset, type PresetsConfig } from "./presets";
@@ -28,33 +39,16 @@ import {
 } from "./storage";
 import {
 	DEFAULT_SESSION_STATE,
-	type ContextRecord,
 	type ManagerSnapshot,
 	type PresetOriginalState,
 	type ResourceSettings,
 	type ResourceTab,
 	type RuntimeLayer,
 	type SessionResourceState,
-	type SkillRecord,
 } from "./types";
 
 const SESSION_ENTRY = "pi-config-manager-state";
-type ToggleableResourceTab = "tools" | "skills" | "contexts";
 type PolicyPhase = "collecting" | "initializing" | "ready" | "stopped";
-
-function isResourceEnabled(
-	snapshot: ManagerSnapshot,
-	tab: ToggleableResourceTab,
-	id: string,
-): boolean {
-	if (tab === "tools") return snapshot.activeTools.has(id);
-	if (tab === "skills") return snapshot.enabledSkills.has(id);
-	return snapshot.enabledContexts.has(id);
-}
-
-function unique(values: Iterable<string>): string[] {
-	return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
-}
 
 export default function piConfigManager(pi: ExtensionAPI) {
 	let globalSettings: ResourceSettings = loadGlobalSettings();
@@ -111,14 +105,6 @@ export default function piConfigManager(pi: ExtensionAPI) {
 
 	function persistSession(): void {
 		pi.appendEntry(SESSION_ENTRY, cloneSessionState(sessionState));
-	}
-
-	function resetSessionResourceOverrides(): void {
-		sessionState.tools = undefined;
-		sessionState.enabledSkills = [];
-		sessionState.disabledSkills = [];
-		sessionState.enabledContexts = [];
-		sessionState.disabledContexts = [];
 	}
 
 	function restoreSession(ctx: ExtensionContext): void {
@@ -262,7 +248,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				"warning",
 			);
 		}
-		return unique(valid);
+		return uniqueSorted(valid);
 	}
 
 	async function applyPreset(
@@ -294,7 +280,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 
 		activePresetName = name;
 		activePreset = preset;
-		resetSessionResourceOverrides();
+		sessionState = resetSessionResourceOverrides(sessionState);
 		sessionState.preset = {
 			name,
 			customTools: false,
@@ -314,7 +300,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		activePreset = undefined;
 		policy.setProfile(undefined);
 		sessionState.preset = undefined;
-		resetSessionResourceOverrides();
+		sessionState = resetSessionResourceOverrides(sessionState);
 		policy.setSessionState(sessionState);
 		if (originalState?.provider && originalState.model) {
 			const model = ctx.modelRegistry.find(
@@ -342,7 +328,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			activePreset = undefined;
 			policy.setProfile(undefined);
 			if (state) sessionState.preset = undefined;
-			resetSessionResourceOverrides();
+			sessionState = resetSessionResourceOverrides(sessionState);
 			policy.setSessionState(sessionState);
 			updatePresetStatus(ctx);
 			return;
@@ -399,36 +385,14 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	}
 
 	function updatePromptInventory(options: BuildSystemPromptOptions): void {
-		const skills: SkillRecord[] = (options.skills ?? [])
-			.map((skill: any) => ({
-				name: skill.name,
-				description: skill.description ?? "No description",
-				path: skill.path ?? skill.filePath ?? "Path unavailable",
-				disableModelInvocation: skill.disableModelInvocation === true,
-				sourceInfo: skill.sourceInfo,
-				loaded: true,
-			}))
-			.sort((a, b) => a.name.localeCompare(b.name));
-		const contexts: ContextRecord[] = (options.contextFiles ?? []).map(
-			(file) => ({ path: file.path, content: file.content }),
-		);
-		const toolSnippets = Object.fromEntries(
-			Object.entries(options.toolSnippets ?? {}).filter(
-				([, snippet]) => typeof snippet === "string" && snippet.length > 0,
-			),
-		);
+		const inventory = buildPromptResourceInventory(options);
 		snapshot = {
 			...snapshot,
+			...inventory,
 			ready: true,
-			customPromptActive: Boolean(options.customPrompt),
-			customSystemPrompt: options.customPrompt,
-			appendedSystemPrompt: options.appendSystemPrompt,
-			toolSnippets,
-			skills,
-			enabledSkills: policy.resolveEnabledSkills(skills),
+			enabledSkills: policy.resolveEnabledSkills(inventory.skills),
 			contextsKnown: true,
-			contexts,
-			enabledContexts: policy.resolveEnabledContexts(contexts),
+			enabledContexts: policy.resolveEnabledContexts(inventory.contexts),
 		};
 		requestHudRender?.();
 	}
@@ -442,34 +406,11 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			const loadedSkillPaths = new Set(
 				snapshot.skills.map((skill) => skill.path),
 			);
-			const unloadedSkills = resources.skills
-				.flatMap((resource): SkillRecord[] => {
-					if (resource.enabled || loadedSkillPaths.has(resource.path))
-						return [];
-					const loaded = loadSkills({
-						cwd: ctx.cwd,
-						agentDir: getAgentDir(),
-						skillPaths: [resource.path],
-						includeDefaults: false,
-					}).skills[0];
-					return [
-						{
-							name:
-								loaded?.name ??
-								(basename(resource.path).toLowerCase() === "skill.md"
-									? basename(dirname(resource.path))
-									: basename(resource.path).replace(/\.md$/i, "")),
-							description:
-								loaded?.description ?? "Disabled in Pi resource settings",
-							path: resource.path,
-							disableModelInvocation: loaded?.disableModelInvocation,
-							sourceInfo: resolvedSourceInfo(resource),
-							loaded: false,
-							nativeResource: resource,
-						},
-					];
-				})
-				.sort((a, b) => a.name.localeCompare(b.name));
+			const unloadedSkills = buildUnloadedSkillInventory(
+				resources.skills,
+				loadedSkillPaths,
+				ctx.cwd,
+			);
 			snapshot = {
 				...snapshot,
 				extensionsKnown: true,
@@ -491,25 +432,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	}
 
 	function refreshSkillsFromCommands(): void {
-		const existingSkills = new Map(
-			snapshot.skills.map((skill) => [skill.name, skill]),
-		);
-		const skills = pi
-			.getCommands()
-			.filter((command) => command.source === "skill")
-			.map((command) => {
-				const name = command.name.replace(/^skill:/, "");
-				return {
-					name,
-					description: command.description ?? "No description",
-					path: command.sourceInfo.path,
-					disableModelInvocation:
-						existingSkills.get(name)?.disableModelInvocation,
-					sourceInfo: command.sourceInfo,
-					loaded: true,
-				};
-			})
-			.sort((a, b) => a.name.localeCompare(b.name));
+		const skills = buildLoadedSkillInventory(pi.getCommands(), snapshot.skills);
 		snapshot = {
 			...snapshot,
 			ready: true,
@@ -531,35 +454,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	}
 
 	function publicSnapshot() {
-		return {
-			ready: snapshot.ready,
-			baseTools: Array.from(policy.resolveBaseTools()),
-			tools: {
-				active: snapshot.activeTools.size,
-				total: snapshot.tools.length,
-			},
-			skills: {
-				enabled: snapshot.enabledSkills.size,
-				total: snapshot.skills.length + snapshot.unloadedSkills.length,
-				unloaded: snapshot.unloadedSkills.length,
-			},
-			contexts: {
-				enabled: snapshot.enabledContexts.size,
-				total: snapshot.contexts.length,
-			},
-			prompts: {
-				enabled: snapshot.prompts.filter((item) => item.enabled).length,
-				total: snapshot.prompts.length,
-			},
-			themes: {
-				enabled: snapshot.themes.filter((item) => item.enabled).length,
-				total: snapshot.themes.length,
-			},
-			extensions: {
-				enabled: snapshot.extensions.filter((item) => item.enabled).length,
-				total: snapshot.extensions.length,
-			},
-		};
+		return buildPublicSnapshot(snapshot, policy.resolveBaseTools());
 	}
 
 	function toggleSessionResource(
@@ -573,7 +468,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			const base = policy.resolveBaseTools();
 			if (wasEffective) base.delete(id);
 			else base.add(id);
-			sessionState.tools = unique(base);
+			sessionState.tools = uniqueSorted(base);
 			if (sessionState.preset) sessionState.preset.customTools = true;
 			policy.setSessionState(sessionState);
 			reconcileTools();
@@ -581,49 +476,29 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			updatePresetStatus(ctx);
 			return;
 		}
-		if (tab === "skills") {
-			const enabled = snapshot.enabledSkills.has(id);
-			sessionState.enabledSkills = sessionState.enabledSkills.filter(
-				(name) => name !== id,
-			);
-			sessionState.disabledSkills = sessionState.disabledSkills.filter(
-				(name) => name !== id,
-			);
-			if (enabled) sessionState.disabledSkills.push(id);
-			else sessionState.enabledSkills.push(id);
-			sessionState.enabledSkills = unique(sessionState.enabledSkills);
-			sessionState.disabledSkills = unique(sessionState.disabledSkills);
-			policy.setSessionState(sessionState);
+		const resourceTab = tab === "skills" ? "skills" : "contexts";
+		const enabled = isResourceEnabled(snapshot, resourceTab, id);
+		sessionState = toggleSessionResourceOverride(
+			sessionState,
+			resourceTab,
+			id,
+			enabled,
+		);
+		policy.setSessionState(sessionState);
+		if (resourceTab === "skills") {
 			snapshot = {
 				...snapshot,
 				enabledSkills: policy.resolveEnabledSkills(snapshot.skills),
 			};
-			persistSession();
-			requestHudRender?.();
-			emitStateChanged();
-			return;
-		}
-		if (tab === "contexts") {
-			const enabled = snapshot.enabledContexts.has(id);
-			sessionState.enabledContexts = sessionState.enabledContexts.filter(
-				(path) => path !== id,
-			);
-			sessionState.disabledContexts = sessionState.disabledContexts.filter(
-				(path) => path !== id,
-			);
-			if (enabled) sessionState.disabledContexts.push(id);
-			else sessionState.enabledContexts.push(id);
-			sessionState.enabledContexts = unique(sessionState.enabledContexts);
-			sessionState.disabledContexts = unique(sessionState.disabledContexts);
-			policy.setSessionState(sessionState);
+		} else {
 			snapshot = {
 				...snapshot,
 				enabledContexts: policy.resolveEnabledContexts(snapshot.contexts),
 			};
-			persistSession();
-			requestHudRender?.();
-			emitStateChanged();
 		}
+		persistSession();
+		requestHudRender?.();
+		emitStateChanged();
 	}
 
 	function setGlobalResource(
@@ -632,29 +507,13 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		enabled: boolean,
 		ctx: ExtensionContext,
 	): void {
-		if (kind === "tools") {
-			const enabledTools = new Set(globalSettings.enabledTools);
-			const disabledTools = new Set(globalSettings.disabledTools);
-			if (enabled) {
-				enabledTools.add(name);
-				disabledTools.delete(name);
-			} else {
-				enabledTools.delete(name);
-				disabledTools.add(name);
-				policy.removeExternalTool(name);
-			}
-			globalSettings = {
-				...globalSettings,
-				enabledTools: unique(enabledTools),
-				disabledTools: unique(disabledTools),
-			};
-		} else {
-			const key = kind === "skills" ? "disabledSkills" : "disabledContexts";
-			const values = new Set(globalSettings[key]);
-			if (enabled) values.delete(name);
-			else values.add(name);
-			globalSettings = { ...globalSettings, [key]: unique(values) };
-		}
+		if (kind === "tools" && !enabled) policy.removeExternalTool(name);
+		globalSettings = updateGlobalResourceSettings(
+			globalSettings,
+			kind,
+			name,
+			enabled,
+		);
 		policy.setSettings(globalSettings, projectSettings);
 		saveGlobalSettings(globalSettings);
 		snapshot = {
@@ -678,12 +537,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		const runtimeControl =
 			tab === "tools" ? snapshot.runtimeToolControls.get(id) : undefined;
 		const projectLocked =
-			!activePresetName &&
-			(tab === "tools"
-				? projectSettings.disabledTools.includes(id)
-				: tab === "skills"
-					? projectSettings.disabledSkills.includes(id)
-					: projectSettings.disabledContexts.includes(id));
+			!activePresetName && isProjectResourceDisabled(projectSettings, tab, id);
 		if (runtimeControl) {
 			ctx.ui.notify(
 				`Tool "${id}" is ${runtimeControl.action === "disable" ? "blocked" : "required"} by runtime constraint "${runtimeControl.layerId}". Clear that constraint before changing its effective state.`,
@@ -813,7 +667,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		if (typeof data.id !== "string") return;
 		const toolNames = (value: unknown): string[] =>
 			Array.isArray(value)
-				? unique(
+				? uniqueSorted(
 						value.filter((item): item is string => typeof item === "string"),
 					)
 				: [];
@@ -910,7 +764,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		restoreSession(ctx);
 		const presetFlag = pi.getFlag("preset");
 		if (typeof presetFlag === "string" && presetFlag) {
-			resetSessionResourceOverrides();
+			sessionState = resetSessionResourceOverrides(sessionState);
 			sessionState.preset = undefined;
 			activePresetName = undefined;
 			activePreset = undefined;

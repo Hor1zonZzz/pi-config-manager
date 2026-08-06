@@ -214,6 +214,113 @@ export async function resolveExtensions(
 	return resources.extensions;
 }
 
+type ResourceScope = "global" | "project";
+type ScopedResourceKind = `${ResourceScope}:${PackageResourceKind}`;
+
+interface PackageResourceChangePlan {
+	topLevel: Map<ScopedResourceKind, PackageResourceChange[]>;
+	globalPackages: PackageResourceChange[];
+	projectPackages: PackageResourceChange[];
+}
+
+function assertSupportedChange(
+	change: PackageResourceChange,
+	cwd: string,
+): void {
+	if (
+		change.kind !== "extensions" ||
+		!isDirectFilePackage(change.resource, cwd)
+	) {
+		return;
+	}
+	throw new Error(
+		`Pi cannot apply per-extension package filters to direct file source ${change.resource.metadata.source}`,
+	);
+}
+
+function planPackageResourceChanges(
+	changes: PackageResourceChange[],
+	cwd: string,
+	trusted: boolean,
+): PackageResourceChangePlan {
+	const plan: PackageResourceChangePlan = {
+		topLevel: new Map(),
+		globalPackages: [],
+		projectPackages: [],
+	};
+	for (const change of changes) {
+		assertSupportedChange(change, cwd);
+		const scope: ResourceScope =
+			change.resource.metadata.scope === "project" ? "project" : "global";
+		if (scope === "project" && !trusted) continue;
+		if (change.resource.metadata.origin === "package") {
+			const target =
+				scope === "project" ? plan.projectPackages : plan.globalPackages;
+			target.push(change);
+			continue;
+		}
+		const key: ScopedResourceKind = `${scope}:${change.kind}`;
+		const scopedChanges = plan.topLevel.get(key) ?? [];
+		scopedChanges.push(change);
+		plan.topLevel.set(key, scopedChanges);
+	}
+	return plan;
+}
+
+function applyTopLevelChangePlan(
+	settingsManager: SettingsManager,
+	changes: Map<ScopedResourceKind, PackageResourceChange[]>,
+	cwd: string,
+): void {
+	for (const [key, scopedChanges] of changes) {
+		const [scope, kind] = key.split(":") as [
+			ResourceScope,
+			PackageResourceKind,
+		];
+		const project = scope === "project";
+		let paths = getTopLevelPaths(settingsManager, kind, project);
+		for (const change of scopedChanges) {
+			paths = updateTopLevelPaths(paths, change, cwd);
+		}
+		setTopLevelPaths(settingsManager, kind, project, paths);
+	}
+}
+
+function applyPackageChangePlan(
+	settingsManager: SettingsManager,
+	plan: PackageResourceChangePlan,
+	cwd: string,
+): void {
+	if (plan.globalPackages.length > 0) {
+		settingsManager.setPackages(
+			applyPackageChanges(
+				settingsManager.getGlobalSettings().packages ?? [],
+				plan.globalPackages,
+				cwd,
+			),
+		);
+	}
+	if (plan.projectPackages.length === 0) return;
+	settingsManager.setProjectPackages(
+		applyPackageChanges(
+			settingsManager.getProjectSettings().packages ?? [],
+			plan.projectPackages,
+			cwd,
+		),
+	);
+}
+
+async function flushSettings(settingsManager: SettingsManager): Promise<void> {
+	await settingsManager.flush();
+	const errors = settingsManager.drainErrors();
+	if (errors.length === 0) return;
+	throw new Error(
+		errors
+			.map((record) => `${record.scope}: ${record.error.message}`)
+			.join("; "),
+	);
+}
+
 export async function savePackageResourceChanges(
 	cwd: string,
 	trusted: boolean,
@@ -221,66 +328,10 @@ export async function savePackageResourceChanges(
 ): Promise<void> {
 	if (changes.length === 0) return;
 	const settingsManager = createSettingsManager(cwd, trusted);
-	const topLevelPaths = new Map<string, string[]>();
-	const globalPackageChanges: PackageResourceChange[] = [];
-	const projectPackageChanges: PackageResourceChange[] = [];
-
-	for (const change of changes) {
-		if (
-			change.kind === "extensions" &&
-			isDirectFilePackage(change.resource, cwd)
-		) {
-			throw new Error(
-				`Pi cannot apply per-extension package filters to direct file source ${change.resource.metadata.source}`,
-			);
-		}
-		const project = change.resource.metadata.scope === "project";
-		if (project && !trusted) continue;
-		if (change.resource.metadata.origin === "package") {
-			(project ? projectPackageChanges : globalPackageChanges).push(change);
-			continue;
-		}
-		const key = `${project ? "project" : "global"}:${change.kind}`;
-		const current =
-			topLevelPaths.get(key) ??
-			getTopLevelPaths(settingsManager, change.kind, project);
-		topLevelPaths.set(key, updateTopLevelPaths(current, change, cwd));
-	}
-
-	for (const [key, paths] of topLevelPaths) {
-		const [scope, kind] = key.split(":") as [
-			"global" | "project",
-			PackageResourceKind,
-		];
-		setTopLevelPaths(settingsManager, kind, scope === "project", paths);
-	}
-	if (globalPackageChanges.length > 0) {
-		settingsManager.setPackages(
-			applyPackageChanges(
-				settingsManager.getGlobalSettings().packages ?? [],
-				globalPackageChanges,
-				cwd,
-			),
-		);
-	}
-	if (trusted && projectPackageChanges.length > 0) {
-		settingsManager.setProjectPackages(
-			applyPackageChanges(
-				settingsManager.getProjectSettings().packages ?? [],
-				projectPackageChanges,
-				cwd,
-			),
-		);
-	}
-	await settingsManager.flush();
-	const errors = settingsManager.drainErrors();
-	if (errors.length > 0) {
-		throw new Error(
-			errors
-				.map((record) => `${record.scope}: ${record.error.message}`)
-				.join("; "),
-		);
-	}
+	const plan = planPackageResourceChanges(changes, cwd, trusted);
+	applyTopLevelChangePlan(settingsManager, plan.topLevel, cwd);
+	applyPackageChangePlan(settingsManager, plan, cwd);
+	await flushSettings(settingsManager);
 }
 
 export async function saveExtensionChanges(

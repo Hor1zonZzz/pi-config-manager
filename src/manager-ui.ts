@@ -20,14 +20,128 @@ import type {
 	ResourceTab,
 } from "./types";
 
+type PolicyResourceTab = "tools" | "skills" | "contexts";
+
 interface ManagerDialogOptions {
 	getSnapshot: () => ManagerSnapshot;
 	prepare: (ctx: ExtensionCommandContext) => Promise<void>;
 	togglePolicyResource: (
-		tab: "tools" | "skills" | "contexts",
+		tab: PolicyResourceTab,
 		id: string,
 		ctx: ExtensionCommandContext,
 	) => void;
+}
+
+type ResourceTogglePlan =
+	| { action: "ignore" }
+	| { action: "reject"; message: string }
+	| { action: "policy"; tab: PolicyResourceTab; id: string }
+	| { action: "stage"; id: string; change: PackageResourceChange };
+
+interface PlanResourceToggleOptions {
+	tab: ResourceTab;
+	id: string;
+	snapshot: ManagerSnapshot;
+	staged: Map<string, PackageResourceChange>;
+	cwd: string;
+}
+
+function planResourceToggle(
+	options: PlanResourceToggleOptions,
+): ResourceTogglePlan {
+	const { tab, id, snapshot, staged, cwd } = options;
+	const packageKind = packageKindForTab(tab);
+	if (packageKind) {
+		const resource = snapshot[packageKind].find(
+			(item) => packageResourceId(packageKind, item) === id,
+		);
+		if (!resource) return { action: "ignore" };
+		if (
+			packageKind === "extensions" &&
+			resource.path.includes("pi-config-manager")
+		) {
+			return {
+				action: "reject",
+				message:
+					"Pi Config Manager cannot disable itself from the active manager.",
+			};
+		}
+		if (packageKind === "extensions" && isDirectFilePackage(resource, cwd)) {
+			return {
+				action: "reject",
+				message:
+					"Pi does not support per-extension filters for a package source that directly names one extension file.",
+			};
+		}
+		const current = staged.get(id)?.enabled ?? resource.enabled;
+		return {
+			action: "stage",
+			id,
+			change: { kind: packageKind, resource, enabled: !current },
+		};
+	}
+	if (tab === "skills") {
+		const unloaded = snapshot.unloadedSkills.find(
+			(skill) =>
+				skill.nativeResource &&
+				packageResourceId("skills", skill.nativeResource) === id,
+		);
+		if (!unloaded?.nativeResource) return { action: "policy", tab, id };
+		const current = staged.get(id)?.enabled ?? false;
+		return {
+			action: "stage",
+			id,
+			change: {
+				kind: "skills",
+				resource: unloaded.nativeResource,
+				enabled: !current,
+			},
+		};
+	}
+	if (tab === "tools" || tab === "contexts") {
+		return { action: "policy", tab, id };
+	}
+	return { action: "ignore" };
+}
+
+function applyResourceTogglePlan(
+	plan: ResourceTogglePlan,
+	staged: Map<string, PackageResourceChange>,
+	ctx: ExtensionCommandContext,
+	options: ManagerDialogOptions,
+): boolean {
+	if (plan.action === "ignore") return false;
+	if (plan.action === "reject") {
+		ctx.ui.notify(plan.message, "warning");
+		return false;
+	}
+	if (plan.action === "stage") staged.set(plan.id, plan.change);
+	else options.togglePolicyResource(plan.tab, plan.id, ctx);
+	return true;
+}
+
+async function saveStagedPackageResources(
+	ctx: ExtensionCommandContext,
+	staged: Map<string, PackageResourceChange>,
+): Promise<void> {
+	const confirmed = await ctx.ui.confirm(
+		"Save package resource changes?",
+		"Package resource changes require Pi to reload. Save and reload now?",
+	);
+	if (!confirmed) return;
+	try {
+		await savePackageResourceChanges(
+			ctx.cwd,
+			ctx.isProjectTrusted(),
+			Array.from(staged.values()),
+		);
+		await ctx.reload();
+	} catch (error) {
+		ctx.ui.notify(
+			`Could not save package resource settings: ${error instanceof Error ? error.message : String(error)}`,
+			"error",
+		);
+	}
 }
 
 export async function selectPreset(
@@ -43,18 +157,16 @@ export async function selectPreset(
 		);
 		return null;
 	}
-	const items: SelectItem[] = names.flatMap((name) => {
+	const items: SelectItem[] = [];
+	for (const name of names) {
 		const preset = presets[name];
-		return preset
-			? [
-					{
-						value: name,
-						label: name === activePresetName ? `${name} (active)` : name,
-						description: describePreset(preset),
-					},
-				]
-			: [];
-	});
+		if (!preset) continue;
+		items.push({
+			value: name,
+			label: name === activePresetName ? `${name} (active)` : name,
+			description: describePreset(preset),
+		});
+	}
 	items.push({
 		value: "(none)",
 		label: "(none)",
@@ -111,60 +223,18 @@ export async function openConfigManager(
 				theme,
 				keybindings,
 				(tab, id) => {
-					const snapshot = options.getSnapshot();
-					const packageKind = packageKindForTab(tab);
-					if (packageKind) {
-						const resource = snapshot[packageKind].find(
-							(item) => packageResourceId(packageKind, item) === id,
-						);
-						if (!resource) return;
-						if (
-							packageKind === "extensions" &&
-							resource.path.includes("pi-config-manager")
-						) {
-							ctx.ui.notify(
-								"Pi Config Manager cannot disable itself from the active manager.",
-								"warning",
-							);
-							return;
-						}
-						if (
-							packageKind === "extensions" &&
-							isDirectFilePackage(resource, ctx.cwd)
-						) {
-							ctx.ui.notify(
-								"Pi does not support per-extension filters for a package source that directly names one extension file.",
-								"warning",
-							);
-							return;
-						}
-						const current =
-							stagedPackageResources.get(id)?.enabled ?? resource.enabled;
-						stagedPackageResources.set(id, {
-							kind: packageKind,
-							resource,
-							enabled: !current,
-						});
-					} else if (tab === "skills") {
-						const unloaded = snapshot.unloadedSkills.find(
-							(skill) =>
-								skill.nativeResource &&
-								packageResourceId("skills", skill.nativeResource) === id,
-						);
-						if (unloaded?.nativeResource) {
-							const current = stagedPackageResources.get(id)?.enabled ?? false;
-							stagedPackageResources.set(id, {
-								kind: "skills",
-								resource: unloaded.nativeResource,
-								enabled: !current,
-							});
-						} else {
-							options.togglePolicyResource(tab, id, ctx);
-						}
-					} else if (tab === "tools" || tab === "contexts") {
-						options.togglePolicyResource(tab, id, ctx);
+					const plan = planResourceToggle({
+						tab,
+						id,
+						snapshot: options.getSnapshot(),
+						staged: stagedPackageResources,
+						cwd: ctx.cwd,
+					});
+					if (
+						applyResourceTogglePlan(plan, stagedPackageResources, ctx, options)
+					) {
+						tui.requestRender();
 					}
-					tui.requestRender();
 				},
 				done,
 			),
@@ -180,24 +250,7 @@ export async function openConfigManager(
 		},
 	);
 	if (action !== "save" || stagedPackageResources.size === 0) return;
-	const confirmed = await ctx.ui.confirm(
-		"Save package resource changes?",
-		"Package resource changes require Pi to reload. Save and reload now?",
-	);
-	if (!confirmed) return;
-	try {
-		await savePackageResourceChanges(
-			ctx.cwd,
-			ctx.isProjectTrusted(),
-			Array.from(stagedPackageResources.values()),
-		);
-		await ctx.reload();
-	} catch (error) {
-		ctx.ui.notify(
-			`Could not save package resource settings: ${error instanceof Error ? error.message : String(error)}`,
-			"error",
-		);
-	}
+	await saveStagedPackageResources(ctx, stagedPackageResources);
 }
 
 export function installResourceHud(

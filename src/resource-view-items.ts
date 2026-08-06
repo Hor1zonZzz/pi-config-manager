@@ -12,10 +12,13 @@ import {
 	type ViewItem,
 } from "./context-monitor";
 import type {
+	ContextRecord,
 	ManagerSnapshot,
 	PackageResourceChange,
 	PackageResourceKind,
 	ResourceTab,
+	RuntimeToolControl,
+	SkillRecord,
 	ToolRecord,
 } from "./types";
 
@@ -62,314 +65,396 @@ function stringifyJson(value: unknown): string {
 	}
 }
 
-export function buildResourceViewItems(
-	tab: ResourceTab,
+function enabledCount(resources: ResolvedResource[]): string {
+	return `${resources.filter((resource) => resource.enabled).length}/${resources.length}`;
+}
+
+function buildOverviewItems(snapshot: ManagerSnapshot): ViewItem[] {
+	const promptSourceCount =
+		Number(Boolean(snapshot.customSystemPrompt)) +
+		Number(Boolean(snapshot.appendedSystemPrompt)) +
+		Number(Boolean(snapshot.presetInstructions));
+	return [
+		{
+			id: "tools",
+			label: "Tools",
+			state: `${snapshot.activeTools.size}/${snapshot.tools.length}`,
+			detail: "Pi-discovered tools and their effective active state.",
+		},
+		{
+			id: "skills",
+			label: "Skills",
+			state: `${snapshot.enabledSkills.size}/${snapshot.skills.length} loaded · ${snapshot.unloadedSkills.length} unloaded`,
+			detail:
+				"Pi-loaded skills use manager policy; skills disabled in Pi settings require reload.",
+		},
+		{
+			id: "contexts",
+			label: "Contexts",
+			state: snapshot.contextsKnown
+				? `${snapshot.enabledContexts.size}/${snapshot.contexts.length} files · ${promptSourceCount} prompt sources`
+				: "loading",
+			detail:
+				"Toggle Pi-loaded context files and inspect read-only system prompt sources.",
+		},
+		{
+			id: "prompts",
+			label: "Prompt Templates",
+			state: snapshot.promptsKnown ? enabledCount(snapshot.prompts) : "loading",
+			detail: "Pi-resolved prompt templates. Changes require reload.",
+		},
+		{
+			id: "themes",
+			label: "Themes",
+			state: snapshot.themesKnown ? enabledCount(snapshot.themes) : "loading",
+			detail: "Pi-resolved themes. Changes require reload.",
+		},
+		{
+			id: "extensions",
+			label: "Extensions",
+			state: snapshot.extensionsKnown
+				? enabledCount(snapshot.extensions)
+				: "loading",
+			detail: "Pi-resolved extension resources. Changes require reload.",
+		},
+	];
+}
+
+function toolControlState(
+	control: RuntimeToolControl | undefined,
+	projectLocked: boolean,
+): string {
+	if (control) {
+		const action = control.action === "disable" ? "blocked" : "required";
+		return ` · ${action} by ${control.layerId}`;
+	}
+	return projectLocked ? " · blocked by project settings" : "";
+}
+
+function toolMonitorNote(
+	snapshot: ManagerSnapshot,
+	tool: ToolRecord,
+	active: boolean,
+): string | undefined {
+	if (!active) return "Pi does not expose an inactive tool's promptSnippet.";
+	if (
+		snapshot.customPromptActive &&
+		(tool.promptSnippet || tool.promptGuidelines?.length)
+	) {
+		return "A custom system prompt is active, so Pi omits this tool's prompt snippet and guidelines.";
+	}
+	return undefined;
+}
+
+function toolPromptContent(
+	tool: ToolRecord,
+	active: boolean,
+	systemPromptVisible: boolean,
+): string {
+	const content = [
+		"Pi tool definition (provider serialization may vary):",
+		stringifyJson({
+			name: tool.name,
+			description: tool.description,
+			parameters: tool.parameters,
+		}),
+	];
+	if (active && tool.promptSnippet) {
+		content.push(
+			"",
+			systemPromptVisible
+				? "System prompt Available tools entry:"
+				: "Prompt snippet:",
+			`- ${tool.name}: ${tool.promptSnippet}`,
+		);
+	}
+	if (!active) content.push("", "Prompt snippet: unavailable while inactive");
+	if (tool.promptGuidelines?.length) {
+		let heading = "Declared prompt guidelines (inactive):";
+		if (active) heading = "Prompt guidelines:";
+		if (active && systemPromptVisible) heading = "System prompt guidelines:";
+		content.push(
+			"",
+			heading,
+			...tool.promptGuidelines.map((line) => `- ${line}`),
+		);
+	}
+	return content.join("\n");
+}
+
+function toolHighlightTarget(tool: ToolRecord, systemPromptVisible: boolean) {
+	if (!systemPromptVisible) return undefined;
+	const lines: string[] = [];
+	if (tool.promptSnippet) lines.push(`- ${tool.name}: ${tool.promptSnippet}`);
+	for (const guideline of tool.promptGuidelines ?? []) {
+		const trimmed = guideline.trim();
+		if (trimmed) lines.push(`- ${trimmed}`);
+	}
+	return { kind: "contains-lines" as const, lines };
+}
+
+function buildToolItem(snapshot: ManagerSnapshot, tool: ToolRecord): ViewItem {
+	const active = snapshot.activeTools.has(tool.name);
+	const runtimeControl = snapshot.runtimeToolControls.get(tool.name);
+	const projectLocked =
+		!snapshot.presetName &&
+		!runtimeControl &&
+		snapshot.projectDisabledTools.has(tool.name);
+	const systemPromptVisible = active && !snapshot.customPromptActive;
+	return {
+		id: tool.name,
+		label: tool.name,
+		enabled: active,
+		locked: Boolean(runtimeControl || projectLocked),
+		state: `${active ? "active" : "inactive"}${toolControlState(runtimeControl, projectLocked)}`,
+		detail: sourceDetail(tool.sourceInfo),
+		monitor: showCapturedSystemPrompt(
+			snapshot,
+			{
+				title: `Tool · ${tool.name}`,
+				channel: "provider tools payload",
+				status: active
+					? "active · definition expected on the next provider request"
+					: "inactive · definition excluded by current policy",
+				statusColor: active ? "success" : "dim",
+				note: toolMonitorNote(snapshot, tool, active),
+				content: toolPromptContent(tool, active, systemPromptVisible),
+				highlightTarget: toolHighlightTarget(tool, systemPromptVisible),
+			},
+			{ showFullPrompt: active },
+		),
+	};
+}
+
+function buildToolItems(snapshot: ManagerSnapshot): ViewItem[] {
+	return snapshot.tools.map((tool) => buildToolItem(snapshot, tool));
+}
+
+interface SkillPresenceState {
+	catalogVisible: boolean;
+	presenceStateLabel: string;
+	status: string;
+}
+
+function skillPresenceState(
+	snapshot: ManagerSnapshot,
+	skill: SkillRecord,
+	enabled: boolean,
+): SkillPresenceState {
+	const readAvailable = snapshot.activeTools.has("read");
+	const catalogVisible =
+		enabled && readAvailable && !skill.disableModelInvocation;
+	if (!enabled) {
+		return {
+			catalogVisible,
+			presenceStateLabel: "disabled",
+			status: "disabled by current policy",
+		};
+	}
+	if (skill.disableModelInvocation) {
+		return {
+			catalogVisible,
+			presenceStateLabel: "catalog omitted",
+			status: "manual invocation only · omitted from the skill catalog",
+		};
+	}
+	if (!readAvailable) {
+		return {
+			catalogVisible,
+			presenceStateLabel: "catalog omitted",
+			status: "enabled, but read is inactive · catalog omitted",
+		};
+	}
+	return {
+		catalogVisible,
+		presenceStateLabel: "enabled",
+		status: "enabled · expected in the next base system prompt",
+	};
+}
+
+function previewSkill(skill: SkillRecord, sourceInfo: SourceInfo): Skill {
+	return {
+		name: skill.name,
+		description: skill.description,
+		filePath: skill.path,
+		baseDir: dirname(skill.path),
+		sourceInfo,
+		disableModelInvocation: false,
+	};
+}
+
+function buildLoadedSkillItem(
+	snapshot: ManagerSnapshot,
+	skill: SkillRecord,
+): ViewItem {
+	const enabled = snapshot.enabledSkills.has(skill.name);
+	const projectLocked =
+		!snapshot.presetName && snapshot.projectDisabledSkills.has(skill.name);
+	const presence = skillPresenceState(snapshot, skill, enabled);
+	const sourceInfo: SourceInfo = {
+		path: skill.path,
+		source: "pi-config-manager-preview",
+		scope: "temporary",
+		origin: "top-level",
+	};
+	return {
+		id: skill.name,
+		label: skill.name,
+		enabled,
+		locked: projectLocked,
+		state: `${enabled ? "enabled" : "disabled"}${projectLocked ? " · blocked by project settings" : ""}`,
+		detail: skill.sourceInfo
+			? `${sourceDetail(skill.sourceInfo)}\n${skill.path}`
+			: skill.path,
+		monitor: showCapturedSystemPrompt(
+			snapshot,
+			{
+				title: `Skill · ${skill.name}`,
+				channel: "system prompt skill catalog",
+				status: presence.status,
+				statusColor: presence.catalogVisible ? "success" : "warning",
+				note: "This previews Pi's base prompt; later extension prompt rewrites can still differ.",
+				content: formatSkillsForPrompt([
+					previewSkill(skill, sourceInfo),
+				]).trim(),
+				highlightTarget: {
+					kind: "skill-fields",
+					skillName: skill.name,
+				},
+			},
+			{
+				showFullPrompt: true,
+				expectation: {
+					shouldBePresent: presence.catalogVisible,
+					stateLabel: presence.presenceStateLabel,
+				},
+			},
+		),
+	};
+}
+
+function buildUnloadedSkillItem(
+	snapshot: ManagerSnapshot,
+	skill: SkillRecord,
+	stagedPackageResources: Map<string, PackageResourceChange>,
+): ViewItem | undefined {
+	const resource = skill.nativeResource;
+	if (!resource) return undefined;
+	const id = packageResourceId("skills", resource);
+	const staged = stagedPackageResources.get(id);
+	const enabled = staged?.enabled ?? false;
+	let state = "not loaded by Pi settings · reload required";
+	if (staged) {
+		const action = enabled ? "enable" : "disable";
+		state = `${action} staged · reload required`;
+	}
+	return {
+		id,
+		label: skill.name,
+		enabled,
+		state,
+		detail: resourceSourceDetail(resource),
+		monitor: showCapturedSystemPrompt(
+			snapshot,
+			{
+				title: `Skill · ${skill.name}`,
+				channel: "system prompt skill catalog",
+				status: "not loaded by Pi settings",
+				statusColor: "dim",
+				content: formatSkillsForPrompt([
+					previewSkill(skill, skill.sourceInfo ?? resolvedSourceInfo(resource)),
+				]).trim(),
+				highlightTarget: {
+					kind: "skill-fields",
+					skillName: skill.name,
+				},
+				note: "Press Space to stage enabling this skill in Pi settings, then S to save and reload.",
+			},
+			{
+				showFullPrompt: true,
+				expectation: {
+					shouldBePresent: false,
+					stateLabel: "not loaded",
+				},
+			},
+		),
+	};
+}
+
+function buildSkillItems(
 	snapshot: ManagerSnapshot,
 	stagedPackageResources: Map<string, PackageResourceChange>,
 ): ViewItem[] {
-	if (tab === "overview") {
-		const promptSourceCount =
-			Number(Boolean(snapshot.customSystemPrompt)) +
-			Number(Boolean(snapshot.appendedSystemPrompt)) +
-			Number(Boolean(snapshot.presetInstructions));
-		return [
-			{
-				id: "tools",
-				label: "Tools",
-				state: `${snapshot.activeTools.size}/${snapshot.tools.length}`,
-				detail: "Pi-discovered tools and their effective active state.",
-			},
-			{
-				id: "skills",
-				label: "Skills",
-				state: `${snapshot.enabledSkills.size}/${snapshot.skills.length} loaded · ${snapshot.unloadedSkills.length} unloaded`,
-				detail:
-					"Pi-loaded skills use manager policy; skills disabled in Pi settings require reload.",
-			},
-			{
-				id: "contexts",
-				label: "Contexts",
-				state: snapshot.contextsKnown
-					? `${snapshot.enabledContexts.size}/${snapshot.contexts.length} files · ${promptSourceCount} prompt sources`
-					: "loading",
-				detail:
-					"Toggle Pi-loaded context files and inspect read-only system prompt sources.",
-			},
-			{
-				id: "prompts",
-				label: "Prompt Templates",
-				state: snapshot.promptsKnown
-					? `${snapshot.prompts.filter((item) => item.enabled).length}/${snapshot.prompts.length}`
-					: "loading",
-				detail: "Pi-resolved prompt templates. Changes require reload.",
-			},
-			{
-				id: "themes",
-				label: "Themes",
-				state: snapshot.themesKnown
-					? `${snapshot.themes.filter((item) => item.enabled).length}/${snapshot.themes.length}`
-					: "loading",
-				detail: "Pi-resolved themes. Changes require reload.",
-			},
-			{
-				id: "extensions",
-				label: "Extensions",
-				state: snapshot.extensionsKnown
-					? `${snapshot.extensions.filter((item) => item.enabled).length}/${snapshot.extensions.length}`
-					: "loading",
-				detail: "Pi-resolved extension resources. Changes require reload.",
-			},
-		];
+	const loadedItems = snapshot.skills.map((skill) =>
+		buildLoadedSkillItem(snapshot, skill),
+	);
+	const unloadedItems: ViewItem[] = [];
+	for (const skill of snapshot.unloadedSkills) {
+		const item = buildUnloadedSkillItem(
+			snapshot,
+			skill,
+			stagedPackageResources,
+		);
+		if (item) unloadedItems.push(item);
 	}
-	if (tab === "tools")
-		return snapshot.tools.map((tool) => {
-			const active = snapshot.activeTools.has(tool.name);
-			const runtimeControl = snapshot.runtimeToolControls.get(tool.name);
-			const projectLocked =
-				!snapshot.presetName &&
-				!runtimeControl &&
-				snapshot.projectDisabledTools.has(tool.name);
-			const controlState = runtimeControl
-				? ` · ${runtimeControl.action === "disable" ? "blocked" : "required"} by ${runtimeControl.layerId}`
-				: projectLocked
-					? " · blocked by project settings"
-					: "";
-			const systemPromptVisible = active && !snapshot.customPromptActive;
-			return {
-				id: tool.name,
-				label: tool.name,
-				enabled: active,
-				locked: Boolean(runtimeControl || projectLocked),
-				state: `${active ? "active" : "inactive"}${controlState}`,
-				detail: sourceDetail(tool.sourceInfo),
-				monitor: showCapturedSystemPrompt(
-					snapshot,
-					{
-						title: `Tool · ${tool.name}`,
-						channel: "provider tools payload",
-						status: active
-							? "active · definition expected on the next provider request"
-							: "inactive · definition excluded by current policy",
-						statusColor: active ? "success" : "dim",
-						note: !active
-							? "Pi does not expose an inactive tool's promptSnippet."
-							: snapshot.customPromptActive &&
-									(tool.promptSnippet || tool.promptGuidelines?.length)
-								? "A custom system prompt is active, so Pi omits this tool's prompt snippet and guidelines."
-								: undefined,
-						content: [
-							"Pi tool definition (provider serialization may vary):",
-							stringifyJson({
-								name: tool.name,
-								description: tool.description,
-								parameters: tool.parameters,
-							}),
-							...(active && tool.promptSnippet
-								? [
-										"",
-										systemPromptVisible
-											? "System prompt Available tools entry:"
-											: "Prompt snippet:",
-										`- ${tool.name}: ${tool.promptSnippet}`,
-									]
-								: []),
-							...(!active
-								? ["", "Prompt snippet: unavailable while inactive"]
-								: []),
-							...(tool.promptGuidelines?.length
-								? [
-										"",
-										active && systemPromptVisible
-											? "System prompt guidelines:"
-											: active
-												? "Prompt guidelines:"
-												: "Declared prompt guidelines (inactive):",
-										...tool.promptGuidelines.map((line) => `- ${line}`),
-									]
-								: []),
-						].join("\n"),
-						highlightTarget: systemPromptVisible
-							? {
-									kind: "contains-lines",
-									lines: [
-										...(tool.promptSnippet
-											? [`- ${tool.name}: ${tool.promptSnippet}`]
-											: []),
-										...(tool.promptGuidelines ?? [])
-											.map((line) => line.trim())
-											.filter(Boolean)
-											.map((line) => `- ${line}`),
-									],
-								}
-							: undefined,
-					},
-					{ showFullPrompt: active },
-				),
-			};
-		});
-	if (tab === "skills") {
-		const loadedItems = snapshot.skills.map((skill) => {
-			const enabled = snapshot.enabledSkills.has(skill.name);
-			const projectLocked =
-				!snapshot.presetName &&
-				snapshot.projectDisabledSkills.has(skill.name);
-			const readAvailable = snapshot.activeTools.has("read");
-			const catalogVisible =
-				enabled && readAvailable && !skill.disableModelInvocation;
-			let presenceStateLabel = "catalog omitted";
-			if (!enabled) presenceStateLabel = "disabled";
-			else if (catalogVisible) presenceStateLabel = "enabled";
-			let status = "enabled · expected in the next base system prompt";
-			if (!enabled) status = "disabled by current policy";
-			else if (skill.disableModelInvocation) {
-				status = "manual invocation only · omitted from the skill catalog";
-			} else if (!readAvailable) {
-				status = "enabled, but read is inactive · catalog omitted";
-			}
-			return {
-				id: skill.name,
-				label: skill.name,
-				enabled,
-				locked: projectLocked,
-				state: `${enabled ? "enabled" : "disabled"}${projectLocked ? " · blocked by project settings" : ""}`,
-				detail: skill.sourceInfo
-					? `${sourceDetail(skill.sourceInfo)}\n${skill.path}`
-					: skill.path,
-				monitor: showCapturedSystemPrompt(
-					snapshot,
-					{
-						title: `Skill · ${skill.name}`,
-						channel: "system prompt skill catalog",
-						status,
-						statusColor: catalogVisible ? "success" : "warning",
-						note: "This previews Pi's base prompt; later extension prompt rewrites can still differ.",
-						content: formatSkillsForPrompt([
-							{
-								name: skill.name,
-								description: skill.description,
-								filePath: skill.path,
-								baseDir: dirname(skill.path),
-								sourceInfo: {
-									path: skill.path,
-									source: "pi-config-manager-preview",
-									scope: "temporary",
-									origin: "top-level",
-								},
-								disableModelInvocation: false,
-							} satisfies Skill,
-						]).trim(),
-						highlightTarget: {
-							kind: "skill-fields",
-							skillName: skill.name,
-						},
-					},
-					{
-						showFullPrompt: true,
-						expectation: {
-							shouldBePresent: catalogVisible,
-							stateLabel: presenceStateLabel,
-						},
-					},
-				),
-			};
-		});
-		const unloadedItems = snapshot.unloadedSkills.flatMap((skill) => {
-			const resource = skill.nativeResource;
-			if (!resource) return [];
-			const id = packageResourceId("skills", resource);
-			const staged = stagedPackageResources.get(id);
-			const enabled = staged?.enabled ?? false;
-			return [
-				{
-					id,
-					label: skill.name,
-					enabled,
-					state: staged
-						? `${enabled ? "enable" : "disable"} staged · reload required`
-						: "not loaded by Pi settings · reload required",
-					detail: resourceSourceDetail(resource),
-					monitor: showCapturedSystemPrompt(
-						snapshot,
-						{
-							title: `Skill · ${skill.name}`,
-							channel: "system prompt skill catalog",
-							status: "not loaded by Pi settings",
-							statusColor: "dim",
-							content: formatSkillsForPrompt([
-								{
-									name: skill.name,
-									description: skill.description,
-									filePath: skill.path,
-									baseDir: dirname(skill.path),
-									sourceInfo:
-										skill.sourceInfo ?? resolvedSourceInfo(resource),
-									disableModelInvocation: false,
-								} satisfies Skill,
-							]).trim(),
-							highlightTarget: {
-								kind: "skill-fields",
-								skillName: skill.name,
-							},
-							note: "Press Space to stage enabling this skill in Pi settings, then S to save and reload.",
-						},
-						{
-							showFullPrompt: true,
-							expectation: {
-								shouldBePresent: false,
-								stateLabel: "not loaded",
-							},
-						},
-					),
+	return [...loadedItems, ...unloadedItems];
+}
+
+function buildContextItem(
+	snapshot: ManagerSnapshot,
+	context: ContextRecord,
+): ViewItem {
+	const enabled = snapshot.enabledContexts.has(context.path);
+	const projectLocked =
+		!snapshot.presetName && snapshot.projectDisabledContexts.has(context.path);
+	return {
+		id: context.path,
+		label: basename(context.path),
+		enabled,
+		locked: projectLocked,
+		state: `${enabled ? "enabled" : "disabled"}${projectLocked ? " · blocked by project settings" : ""}`,
+		detail: context.path,
+		monitor: showCapturedSystemPrompt(
+			snapshot,
+			{
+				title: `Context · ${basename(context.path)}`,
+				channel: "system prompt project_context section",
+				status: enabled
+					? "enabled · expected in the next base system prompt"
+					: "disabled by current policy",
+				statusColor: enabled ? "success" : "warning",
+				note: "This previews Pi's base prompt; later extension prompt rewrites can still differ.",
+				content: formatContextSection([context]).trim(),
+				highlightTarget: {
+					kind: "contains-lines",
+					lines: [`<project_instructions path="${context.path}">`],
 				},
-			];
-		});
-		return [...loadedItems, ...unloadedItems];
-	}
-	if (tab === "contexts") {
-		const contextItems = snapshot.contexts.map((context) => {
-			const enabled = snapshot.enabledContexts.has(context.path);
-			const projectLocked =
-				!snapshot.presetName &&
-				snapshot.projectDisabledContexts.has(context.path);
-			return {
-				id: context.path,
-				label: basename(context.path),
-				enabled,
-				locked: projectLocked,
-				state: `${enabled ? "enabled" : "disabled"}${projectLocked ? " · blocked by project settings" : ""}`,
-				detail: context.path,
-				monitor: showCapturedSystemPrompt(
-					snapshot,
-					{
-						title: `Context · ${basename(context.path)}`,
-						channel: "system prompt project_context section",
-						status: enabled
-							? "enabled · expected in the next base system prompt"
-							: "disabled by current policy",
-						statusColor: enabled ? "success" : "warning",
-						note: "This previews Pi's base prompt; later extension prompt rewrites can still differ.",
-						content: formatContextSection([context]).trim(),
-						highlightTarget: {
-							kind: "contains-lines" as const,
-							lines: [`<project_instructions path="${context.path}">`],
-						},
-					},
-					{
-						showFullPrompt: true,
-						expectation: {
-							shouldBePresent: enabled,
-							stateLabel: enabled ? "enabled" : "disabled",
-						},
-					},
-				),
-			};
-		});
-		return [...getPromptSourceItems(snapshot), ...contextItems];
-	}
-	const packageKind = packageKindForTab(tab);
-	if (!packageKind) return [];
-	return snapshot[packageKind].map((resource) => {
-		const id = packageResourceId(packageKind, resource);
+			},
+			{
+				showFullPrompt: true,
+				expectation: {
+					shouldBePresent: enabled,
+					stateLabel: enabled ? "enabled" : "disabled",
+				},
+			},
+		),
+	};
+}
+
+function buildContextItems(snapshot: ManagerSnapshot): ViewItem[] {
+	return [
+		...getPromptSourceItems(snapshot),
+		...snapshot.contexts.map((context) => buildContextItem(snapshot, context)),
+	];
+}
+
+function buildPackageItems(
+	kind: Exclude<PackageResourceKind, "skills">,
+	snapshot: ManagerSnapshot,
+	stagedPackageResources: Map<string, PackageResourceChange>,
+): ViewItem[] {
+	return snapshot[kind].map((resource) => {
+		const id = packageResourceId(kind, resource);
 		const staged = stagedPackageResources.get(id);
 		const enabled = staged?.enabled ?? resource.enabled;
 		return {
@@ -382,4 +467,19 @@ export function buildResourceViewItems(
 	});
 }
 
-
+export function buildResourceViewItems(
+	tab: ResourceTab,
+	snapshot: ManagerSnapshot,
+	stagedPackageResources: Map<string, PackageResourceChange>,
+): ViewItem[] {
+	if (tab === "overview") return buildOverviewItems(snapshot);
+	if (tab === "tools") return buildToolItems(snapshot);
+	if (tab === "skills") {
+		return buildSkillItems(snapshot, stagedPackageResources);
+	}
+	if (tab === "contexts") return buildContextItems(snapshot);
+	const packageKind = packageKindForTab(tab);
+	return packageKind
+		? buildPackageItems(packageKind, snapshot, stagedPackageResources)
+		: [];
+}
