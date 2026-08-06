@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh pre-run prompt previews whenever the manager opens and publish current skill/context counts after policy changes.
 - Filter every duplicate standard skill/context prompt section and report filtering failures on every affected run.
 - Generalize Pi package-resource resolution and settings writes across extensions, skills, prompt templates, and themes while retaining source metadata.
+- Split the manager UI, prompt monitoring, resource view models, prompt policy, and behavior tests into focused modules without changing the public API.
 
 ## [0.2.0] - 2026-08-02
 
