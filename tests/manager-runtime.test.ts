@@ -21,6 +21,40 @@ const {
 	writeProjectResourceSettings,
 } = env;
 
+function presetBranchEntry(name: string, tools: string[]) {
+	return {
+		type: "custom",
+		customType: "pi-config-manager-state",
+		data: {
+			version: 2,
+			enabledSkills: [],
+			disabledSkills: [],
+			enabledContexts: [],
+			disabledContexts: [],
+			preset: {
+				name,
+				customTools: false,
+				appliedTools: tools,
+				originalState: {
+					provider: "fixture",
+					model: "base",
+					thinkingLevel: "medium",
+					tools: ["read", "bash"],
+				},
+			},
+		},
+	};
+}
+
+function emptyPromptOptions(selectedTools: string[]) {
+	return {
+		selectedTools,
+		toolSnippets: {},
+		skills: [],
+		contextFiles: [],
+	};
+}
+
 describe("manager behavior contract", () => {
 	test("registers the public commands and applies global tool defaults on startup", async () => {
 		writeFileSync(
@@ -620,44 +654,42 @@ describe("manager behavior contract", () => {
 		const harness = createHarness({
 			tools: [{ name: "read" }, { name: "bash" }],
 			activeTools: ["read", "bash"],
-			branch: [
-				{
-					type: "custom",
-					customType: "pi-config-manager-state",
-					data: {
-						version: 2,
-						enabledSkills: [],
-						disabledSkills: [],
-						enabledContexts: [],
-						disabledContexts: [],
-						preset: {
-							name: "review",
-							customTools: false,
-							appliedTools: ["read"],
-							originalState: {
-								provider: "fixture",
-								model: "base",
-								thinkingLevel: "medium",
-								tools: ["read", "bash"],
-							},
-						},
-					},
-				},
-			],
+			branch: [presetBranchEntry("review", ["read"])],
 		});
 		await harness.start();
 		try {
 			expect(harness.getActiveTools()).toEqual(["read"]);
 			const result = await harness.trigger("before_agent_start", {
 				systemPrompt: "Base",
-				systemPromptOptions: {
-					selectedTools: ["read"],
-					toolSnippets: {},
-					skills: [],
-					contextFiles: [],
-				},
+				systemPromptOptions: emptyPromptOptions(["read"]),
 			});
 			expect(result.systemPrompt).toBe("Base\n\nREVIEW MODE");
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("restores a different preset after session tree navigation", async () => {
+		writePresets({
+			review: { tools: ["read"], instructions: "REVIEW MODE" },
+			focus: { tools: ["bash"], instructions: "FOCUS MODE" },
+		});
+		const branch = [presetBranchEntry("review", ["read"])];
+		const harness = createHarness({
+			tools: [{ name: "read" }, { name: "bash" }],
+			activeTools: ["read", "bash"],
+			branch,
+		});
+		await harness.start();
+		try {
+			branch[0] = presetBranchEntry("focus", ["bash"]);
+			await harness.trigger("session_tree");
+			expect(harness.getActiveTools()).toEqual(["bash"]);
+			const result = await harness.trigger("before_agent_start", {
+				systemPrompt: "Base",
+				systemPromptOptions: emptyPromptOptions(["bash"]),
+			});
+			expect(result.systemPrompt).toBe("Base\n\nFOCUS MODE");
 		} finally {
 			await harness.shutdown();
 		}
