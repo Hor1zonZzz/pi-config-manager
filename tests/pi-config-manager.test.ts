@@ -12,7 +12,13 @@ import { tmpdir } from "node:os";
 import { formatSkillsForPrompt } from "@earendil-works/pi-coding-agent";
 import piConfigManager from "../src/index";
 import { loadPresets } from "../src/presets";
-import { isDirectFilePackage, saveExtensionChanges } from "../src/extensions";
+import {
+	isDirectFilePackage,
+	resolveExtensions,
+	resolvePackageResources,
+	saveExtensionChanges,
+	savePackageResourceChanges,
+} from "../src/extensions";
 import {
 	cloneSessionState,
 	normalizeResourceSettings,
@@ -51,21 +57,27 @@ interface HarnessOptions {
 	promptOptions?: Record<string, unknown>;
 	presetFlag?: string;
 	models?: Array<{ provider: string; id: string; authenticated?: boolean }>;
+	confirm?: boolean;
 }
 
 const tempRoots: string[] = [];
 let agentDir = "";
 let cwd = "";
+let originalHome: string | undefined;
 
 beforeEach(() => {
 	agentDir = mkdtempSync(join(tmpdir(), "pi-config-manager-agent-"));
 	cwd = mkdtempSync(join(tmpdir(), "pi-config-manager-project-"));
 	tempRoots.push(agentDir, cwd);
+	originalHome = process.env.HOME;
+	process.env.HOME = agentDir;
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 });
 
 afterEach(() => {
 	delete process.env.PI_CODING_AGENT_DIR;
+	if (originalHome === undefined) delete process.env.HOME;
+	else process.env.HOME = originalHome;
 	while (tempRoots.length > 0) {
 		rmSync(tempRoots.pop()!, { recursive: true, force: true });
 	}
@@ -149,6 +161,7 @@ function createHarness(options: HarnessOptions = {}) {
 		| undefined;
 	let editorFactory: any;
 	let thinkingLevel = "medium";
+	let reloads = 0;
 	let currentModel = { provider: "fixture", id: "base", authenticated: true };
 	const models = options.models ?? [currentModel];
 
@@ -236,7 +249,7 @@ function createHarness(options: HarnessOptions = {}) {
 			return customImplementation(factory, customOptions);
 		},
 		async confirm() {
-			return false;
+			return options.confirm ?? false;
 		},
 		getEditorComponent() {
 			return editorFactory;
@@ -258,6 +271,9 @@ function createHarness(options: HarnessOptions = {}) {
 		isProjectTrusted: () => options.trusted ?? false,
 		getSystemPrompt: () => systemPrompt,
 		getSystemPromptOptions: () => promptOptions,
+		async reload() {
+			reloads += 1;
+		},
 		get model() {
 			return currentModel;
 		},
@@ -302,6 +318,7 @@ function createHarness(options: HarnessOptions = {}) {
 		getActiveTools: () => [...activeTools],
 		getModel: () => currentModel,
 		getThinkingLevel: () => thinkingLevel,
+		getReloads: () => reloads,
 		setExternalActiveTools: (names: string[]) => {
 			activeTools = [...names];
 		},
@@ -395,7 +412,7 @@ describe("storage compatibility", () => {
 	});
 });
 
-describe("extension settings compatibility", () => {
+describe("package resource settings compatibility", () => {
 	test("identifies only local package entries that directly name the extension file", () => {
 		const extensionPath = join(cwd, "direct-extension.ts");
 		const base = {
@@ -484,6 +501,109 @@ describe("extension settings compatibility", () => {
 		]);
 		expect(pkg.skills).toEqual(["skills"]);
 	});
+
+	test("resolves all native package resource kinds with their enabled state", async () => {
+		mkdirSync(join(agentDir, "extensions"), { recursive: true });
+		mkdirSync(join(agentDir, "skills", "hidden"), { recursive: true });
+		mkdirSync(join(agentDir, "prompts"), { recursive: true });
+		mkdirSync(join(agentDir, "themes"), { recursive: true });
+		writeFileSync(
+			join(agentDir, "extensions", "fixture.ts"),
+			"export default () => {};\n",
+		);
+		writeFileSync(
+			join(agentDir, "skills", "hidden", "SKILL.md"),
+			"---\nname: hidden\ndescription: Hidden skill\n---\n",
+		);
+		writeFileSync(join(agentDir, "prompts", "review.md"), "# Review\n");
+		writeFileSync(join(agentDir, "themes", "fixture.json"), "{}\n");
+		writeAgentSettings({
+			extensions: ["-extensions/fixture.ts"],
+			skills: ["-skills/hidden/SKILL.md"],
+			prompts: ["-prompts/review.md"],
+			themes: ["-themes/fixture.json"],
+		});
+
+		const resources = await resolvePackageResources(cwd, false);
+		expect(await resolveExtensions(cwd, false)).toEqual(resources.extensions);
+		expect(resources.extensions).toHaveLength(1);
+		expect(resources.skills).toHaveLength(1);
+		expect(resources.prompts).toHaveLength(1);
+		expect(resources.themes).toHaveLength(1);
+		expect(
+			[
+				...resources.extensions,
+				...resources.skills,
+				...resources.prompts,
+				...resources.themes,
+			].every((resource) => resource.enabled === false),
+		).toBe(true);
+	});
+
+	test("writes prompt and theme overrides through native Pi settings", async () => {
+		writeAgentSettings({
+			prompts: ["prompts/other.md", "-prompts/review.md"],
+			themes: ["-themes/fixture.json"],
+		});
+		const prompt = {
+			path: join(agentDir, "prompts", "review.md"),
+			enabled: false,
+			metadata: {
+				scope: "user",
+				origin: "top-level",
+				source: "auto",
+				baseDir: agentDir,
+			},
+		};
+		const theme = {
+			path: join(agentDir, "themes", "fixture.json"),
+			enabled: false,
+			metadata: {
+				scope: "user",
+				origin: "top-level",
+				source: "auto",
+				baseDir: agentDir,
+			},
+		};
+
+		await savePackageResourceChanges(cwd, false, [
+			{ kind: "prompts", resource: prompt as any, enabled: true },
+			{ kind: "themes", resource: theme as any, enabled: true },
+		]);
+		const settings = readAgentSettings();
+		expect(settings.prompts).toEqual([
+			"prompts/other.md",
+			"+prompts/review.md",
+		]);
+		expect(settings.themes).toEqual(["+themes/fixture.json"]);
+	});
+
+	test("writes trusted project resource overrides to project settings", async () => {
+		const configDir = join(cwd, ".pi");
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(
+			join(configDir, "settings.json"),
+			`${JSON.stringify({ prompts: ["-prompts/review.md"] })}\n`,
+		);
+		const prompt = {
+			path: join(configDir, "prompts", "review.md"),
+			enabled: false,
+			metadata: {
+				scope: "project",
+				origin: "top-level",
+				source: "auto",
+				baseDir: configDir,
+			},
+		};
+
+		await savePackageResourceChanges(cwd, true, [
+			{ kind: "prompts", resource: prompt as any, enabled: true },
+		]);
+		const settings = JSON.parse(
+			readFileSync(join(configDir, "settings.json"), "utf8"),
+		);
+		expect(settings.prompts).toEqual(["+prompts/review.md"]);
+	});
 });
 
 describe("manager behavior contract", () => {
@@ -506,7 +626,9 @@ describe("manager behavior contract", () => {
 				"contexts",
 				"extensions",
 				"preset",
+				"prompts",
 				"skills",
+				"themes",
 				"tools",
 			]);
 			expect(harness.flags.has("preset")).toBe(true);
@@ -520,6 +642,92 @@ describe("manager behavior contract", () => {
 				baseTools: ["read"],
 				tools: { active: 1, total: 2 },
 			});
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("stages prompt and theme settings and reloads after saving", async () => {
+		mkdirSync(join(agentDir, "prompts"), { recursive: true });
+		mkdirSync(join(agentDir, "themes"), { recursive: true });
+		writeFileSync(join(agentDir, "prompts", "review.md"), "# Review\n");
+		writeFileSync(join(agentDir, "themes", "fixture.json"), "{}\n");
+		const harness = createHarness({ confirm: true });
+		await harness.start();
+		try {
+			const rendered: string[] = [];
+			harness.setCustomImplementation(async (factory) => {
+				let result: "close" | "save" = "close";
+				const component = await factory(
+					{ requestRender() {} },
+					createTheme(),
+					createKeybindings(),
+					(value: "close" | "save") => {
+						result = value;
+					},
+				);
+				rendered.push(component.render(180).join("\n"));
+				component.handleInput(" ");
+				rendered.push(component.render(180).join("\n"));
+				component.handleInput("S");
+				return result;
+			});
+
+			await harness.commands.get("prompts").handler("", harness.ctx);
+			expect(readAgentSettings().prompts).toEqual(["-prompts/review.md"]);
+			expect(harness.getReloads()).toBe(1);
+			await harness.commands.get("themes").handler("", harness.ctx);
+			expect(readAgentSettings().themes).toEqual(["-themes/fixture.json"]);
+			expect(harness.getReloads()).toBe(2);
+			const output = rendered.join("\n");
+			expect(output).toContain("[Prompt Templates]");
+			expect(output).toContain("[Themes]");
+			expect(output).toContain("View/Edit: Pi settings");
+			expect(output).toContain("staged");
+			expect(output).toContain("reload required");
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("re-enables a skill disabled in native Pi settings", async () => {
+		const skillPath = join(agentDir, "skills", "hidden", "SKILL.md");
+		mkdirSync(join(agentDir, "skills", "hidden"), { recursive: true });
+		writeFileSync(
+			skillPath,
+			"---\nname: hidden\ndescription: Hidden skill\n---\n",
+		);
+		writeAgentSettings({ skills: ["-skills/hidden/SKILL.md"] });
+		const harness = createHarness({ confirm: true, skills: [] });
+		await harness.start();
+		try {
+			let renderedBefore = "";
+			let renderedAfter = "";
+			harness.setCustomImplementation(async (factory) => {
+				let result: "close" | "save" = "close";
+				const component = await factory(
+					{ requestRender() {} },
+					createTheme(),
+					createKeybindings(),
+					(value: "close" | "save") => {
+						result = value;
+					},
+				);
+				renderedBefore = component.render(180).join("\n");
+				component.handleInput(" ");
+				renderedAfter = component.render(180).join("\n");
+				component.handleInput("S");
+				return result;
+			});
+
+			await harness.commands.get("skills").handler("", harness.ctx);
+			expect(renderedBefore).toContain("hidden");
+			expect(renderedBefore).toContain(
+				"not loaded by Pi settings · reload required",
+			);
+			expect(renderedAfter).toContain("enable staged · reload required");
+			expect(readAgentSettings().skills).toEqual(["+skills/hidden/SKILL.md"]);
+			expect(harness.getReloads()).toBe(1);
 		} finally {
 			await harness.shutdown();
 		}
@@ -1530,7 +1738,7 @@ describe("manager behavior contract", () => {
 			let state = harness.emissions
 				.filter((event) => event.name === "config-manager:state-changed")
 				.at(-1)?.data;
-			expect(state.skills).toEqual({ enabled: 0, total: 1 });
+			expect(state.skills).toEqual({ enabled: 0, total: 1, unloaded: 0 });
 			await harness.commands
 				.get("contexts")
 				.handler(`global disable ${context.path}`, harness.ctx);
@@ -1719,6 +1927,8 @@ describe("manager behavior contract", () => {
 				);
 				rendered = component.render(100).join("\n");
 				component.handleInput(" ");
+				component.handleInput("tab");
+				component.handleInput("tab");
 				component.handleInput("tab");
 				component.handleInput("tab");
 				component.handleInput("tab");

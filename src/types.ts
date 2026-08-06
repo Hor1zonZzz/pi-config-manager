@@ -8,6 +8,8 @@ export type ResourceTab =
 	| "tools"
 	| "skills"
 	| "contexts"
+	| "prompts"
+	| "themes"
 	| "extensions";
 
 export interface ResourceSettings {
@@ -65,6 +67,9 @@ export interface SkillRecord {
 	description: string;
 	path: string;
 	disableModelInvocation?: boolean;
+	sourceInfo?: SourceInfo;
+	loaded?: boolean;
+	nativeResource?: ResolvedResource;
 }
 
 export interface ContextRecord {
@@ -97,6 +102,8 @@ export interface ManagerSnapshot {
 	presetInstructions?: string;
 	contextsKnown: boolean;
 	extensionsKnown: boolean;
+	promptsKnown: boolean;
+	themesKnown: boolean;
 	tools: ToolRecord[];
 	toolSnippets: Record<string, string>;
 	effectiveSystemPrompt?: EffectiveSystemPrompt;
@@ -104,13 +111,35 @@ export interface ManagerSnapshot {
 	runtimeToolControls: Map<string, RuntimeToolControl>;
 	projectDisabledTools: Set<string>;
 	skills: SkillRecord[];
+	unloadedSkills: SkillRecord[];
 	enabledSkills: Set<string>;
 	projectDisabledSkills: Set<string>;
 	contexts: ContextRecord[];
 	enabledContexts: Set<string>;
 	projectDisabledContexts: Set<string>;
 	extensions: ResolvedResource[];
+	prompts: ResolvedResource[];
+	themes: ResolvedResource[];
 	presetName?: string;
+}
+
+export type PackageResourceKind =
+	| "extensions"
+	| "skills"
+	| "prompts"
+	| "themes";
+
+export interface PackageResourceCatalog {
+	extensions: ResolvedResource[];
+	skills: ResolvedResource[];
+	prompts: ResolvedResource[];
+	themes: ResolvedResource[];
+}
+
+export interface PackageResourceChange {
+	kind: PackageResourceKind;
+	resource: ResolvedResource;
+	enabled: boolean;
 }
 
 export interface ExtensionChange {

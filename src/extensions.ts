@@ -5,9 +5,15 @@ import {
 	DefaultPackageManager,
 	getAgentDir,
 	SettingsManager,
+	type PackageSource,
 	type ResolvedResource,
 } from "@earendil-works/pi-coding-agent";
-import type { ExtensionChange } from "./types";
+import type {
+	ExtensionChange,
+	PackageResourceCatalog,
+	PackageResourceChange,
+	PackageResourceKind,
+} from "./types";
 
 function normalizePattern(pattern: string): string {
 	return pattern.replaceAll("\\", "/").replace(/^\.\//, "");
@@ -38,7 +44,7 @@ function canonicalBase(resource: ResolvedResource, cwd: string): string {
 	);
 }
 
-function extensionPattern(resource: ResolvedResource, cwd: string): string {
+function resourcePattern(resource: ResolvedResource, cwd: string): string {
 	return normalizePattern(
 		relative(canonicalBase(resource, cwd), resource.path),
 	);
@@ -62,16 +68,8 @@ export function isDirectFilePackage(
 	return candidates.some((candidate) => candidate === resolve(resource.path));
 }
 
-function packageSource(entry: unknown): string | undefined {
-	if (typeof entry === "string") return entry;
-	if (
-		entry &&
-		typeof entry === "object" &&
-		typeof (entry as { source?: unknown }).source === "string"
-	) {
-		return (entry as { source: string }).source;
-	}
-	return undefined;
+function packageSource(entry: PackageSource): string {
+	return typeof entry === "string" ? entry : entry.source;
 }
 
 function equivalentPatterns(
@@ -83,13 +81,13 @@ function equivalentPatterns(
 			? join(cwd, CONFIG_DIR_NAME)
 			: getAgentDir();
 	return new Set([
-		extensionPattern(resource, cwd),
+		resourcePattern(resource, cwd),
 		normalizePattern(resource.path),
 		normalizePattern(relative(scopeBase, resource.path)),
 	]);
 }
 
-function replaceExtensionOverride(
+function replaceResourceOverride(
 	entries: string[],
 	aliases: Set<string>,
 	override: string,
@@ -104,21 +102,21 @@ function replaceExtensionOverride(
 
 function updateTopLevelPaths(
 	paths: string[],
-	change: ExtensionChange,
+	change: PackageResourceChange,
 	cwd: string,
 ): string[] {
-	return replaceExtensionOverride(
+	return replaceResourceOverride(
 		paths,
 		equivalentPatterns(change.resource, cwd),
-		`${change.enabled ? "+" : "-"}${extensionPattern(change.resource, cwd)}`,
+		`${change.enabled ? "+" : "-"}${resourcePattern(change.resource, cwd)}`,
 	);
 }
 
 function applyPackageChanges(
-	packages: unknown[],
-	changes: ExtensionChange[],
+	packages: PackageSource[],
+	changes: PackageResourceChange[],
 	cwd: string,
-): unknown[] {
+): PackageSource[] {
 	const updatedPackages = [...packages];
 	for (const change of changes) {
 		const source = change.resource.metadata.source;
@@ -127,64 +125,111 @@ function applyPackageChanges(
 		);
 		if (packageIndex < 0) continue;
 		const currentEntry = updatedPackages[packageIndex];
-		const packageEntry =
+		if (!currentEntry) continue;
+		const packageEntry: Exclude<PackageSource, string> =
 			typeof currentEntry === "string"
 				? { source: currentEntry }
-				: { ...(currentEntry as object) };
-		const current = (packageEntry as { extensions?: string[] }).extensions;
-		const pattern = extensionPattern(change.resource, cwd);
+				: { ...currentEntry };
+		const current = packageEntry[change.kind];
+		const pattern = resourcePattern(change.resource, cwd);
 		const aliases = equivalentPatterns(change.resource, cwd);
 
-		if (
-			current?.length === 0 &&
-			(packageEntry as { autoload?: boolean }).autoload !== false
-		) {
-			if (change.enabled)
-				(packageEntry as { extensions?: string[] }).extensions = [pattern];
+		if (current?.length === 0 && packageEntry.autoload !== false) {
+			if (change.enabled) {
+				packageEntry[change.kind] = [pattern];
+			}
 		} else {
-			(packageEntry as { extensions?: string[] }).extensions =
-				replaceExtensionOverride(
-					current ?? [],
-					aliases,
-					`${change.enabled ? "+" : "-"}${pattern}`,
-				);
+			packageEntry[change.kind] = replaceResourceOverride(
+				current ?? [],
+				aliases,
+				`${change.enabled ? "+" : "-"}${pattern}`,
+			);
 		}
 		updatedPackages[packageIndex] = packageEntry;
 	}
 	return updatedPackages;
 }
 
-export async function resolveExtensions(
+function getTopLevelPaths(
+	settingsManager: SettingsManager,
+	kind: PackageResourceKind,
+	project: boolean,
+): string[] {
+	const settings = project
+		? settingsManager.getProjectSettings()
+		: settingsManager.getGlobalSettings();
+	return [...(settings[kind] ?? [])];
+}
+
+function setTopLevelPaths(
+	settingsManager: SettingsManager,
+	kind: PackageResourceKind,
+	project: boolean,
+	paths: string[],
+): void {
+	if (kind === "extensions") {
+		if (project) settingsManager.setProjectExtensionPaths(paths);
+		else settingsManager.setExtensionPaths(paths);
+		return;
+	}
+	if (kind === "skills") {
+		if (project) settingsManager.setProjectSkillPaths(paths);
+		else settingsManager.setSkillPaths(paths);
+		return;
+	}
+	if (kind === "prompts") {
+		if (project) settingsManager.setProjectPromptTemplatePaths(paths);
+		else settingsManager.setPromptTemplatePaths(paths);
+		return;
+	}
+	if (project) settingsManager.setProjectThemePaths(paths);
+	else settingsManager.setThemePaths(paths);
+}
+
+export async function resolvePackageResources(
 	cwd: string,
 	trusted: boolean,
-): Promise<ResolvedResource[]> {
+): Promise<PackageResourceCatalog> {
 	const settingsManager = createSettingsManager(cwd, trusted);
 	const resolved = await new DefaultPackageManager({
 		cwd,
 		agentDir: getAgentDir(),
 		settingsManager,
 	}).resolve(async () => "skip");
-	return resolved.extensions.sort((a, b) => a.path.localeCompare(b.path));
+	return {
+		extensions: [...resolved.extensions].sort((a, b) =>
+			a.path.localeCompare(b.path),
+		),
+		skills: [...resolved.skills].sort((a, b) => a.path.localeCompare(b.path)),
+		prompts: [...resolved.prompts].sort((a, b) => a.path.localeCompare(b.path)),
+		themes: [...resolved.themes].sort((a, b) => a.path.localeCompare(b.path)),
+	};
 }
 
-export async function saveExtensionChanges(
+export async function resolveExtensions(
 	cwd: string,
 	trusted: boolean,
-	changes: ExtensionChange[],
+): Promise<ResolvedResource[]> {
+	const resources = await resolvePackageResources(cwd, trusted);
+	return resources.extensions;
+}
+
+export async function savePackageResourceChanges(
+	cwd: string,
+	trusted: boolean,
+	changes: PackageResourceChange[],
 ): Promise<void> {
 	if (changes.length === 0) return;
 	const settingsManager = createSettingsManager(cwd, trusted);
-	let globalPaths = [...(settingsManager.getGlobalSettings().extensions ?? [])];
-	let projectPaths = [
-		...(settingsManager.getProjectSettings().extensions ?? []),
-	];
-	let globalPathsChanged = false;
-	let projectPathsChanged = false;
-	const globalPackageChanges: ExtensionChange[] = [];
-	const projectPackageChanges: ExtensionChange[] = [];
+	const topLevelPaths = new Map<string, string[]>();
+	const globalPackageChanges: PackageResourceChange[] = [];
+	const projectPackageChanges: PackageResourceChange[] = [];
 
 	for (const change of changes) {
-		if (isDirectFilePackage(change.resource, cwd)) {
+		if (
+			change.kind === "extensions" &&
+			isDirectFilePackage(change.resource, cwd)
+		) {
 			throw new Error(
 				`Pi cannot apply per-extension package filters to direct file source ${change.resource.metadata.source}`,
 			);
@@ -193,25 +238,29 @@ export async function saveExtensionChanges(
 		if (project && !trusted) continue;
 		if (change.resource.metadata.origin === "package") {
 			(project ? projectPackageChanges : globalPackageChanges).push(change);
-		} else if (project) {
-			projectPaths = updateTopLevelPaths(projectPaths, change, cwd);
-			projectPathsChanged = true;
-		} else {
-			globalPaths = updateTopLevelPaths(globalPaths, change, cwd);
-			globalPathsChanged = true;
+			continue;
 		}
+		const key = `${project ? "project" : "global"}:${change.kind}`;
+		const current =
+			topLevelPaths.get(key) ??
+			getTopLevelPaths(settingsManager, change.kind, project);
+		topLevelPaths.set(key, updateTopLevelPaths(current, change, cwd));
 	}
 
-	if (globalPathsChanged) settingsManager.setExtensionPaths(globalPaths);
-	if (trusted && projectPathsChanged)
-		settingsManager.setProjectExtensionPaths(projectPaths);
+	for (const [key, paths] of topLevelPaths) {
+		const [scope, kind] = key.split(":") as [
+			"global" | "project",
+			PackageResourceKind,
+		];
+		setTopLevelPaths(settingsManager, kind, scope === "project", paths);
+	}
 	if (globalPackageChanges.length > 0) {
 		settingsManager.setPackages(
 			applyPackageChanges(
 				settingsManager.getGlobalSettings().packages ?? [],
 				globalPackageChanges,
 				cwd,
-			) as any,
+			),
 		);
 	}
 	if (trusted && projectPackageChanges.length > 0) {
@@ -220,7 +269,7 @@ export async function saveExtensionChanges(
 				settingsManager.getProjectSettings().packages ?? [],
 				projectPackageChanges,
 				cwd,
-			) as any,
+			),
 		);
 	}
 	await settingsManager.flush();
@@ -232,4 +281,16 @@ export async function saveExtensionChanges(
 				.join("; "),
 		);
 	}
+}
+
+export async function saveExtensionChanges(
+	cwd: string,
+	trusted: boolean,
+	changes: ExtensionChange[],
+): Promise<void> {
+	await savePackageResourceChanges(
+		cwd,
+		trusted,
+		changes.map((change) => ({ ...change, kind: "extensions" })),
+	);
 }

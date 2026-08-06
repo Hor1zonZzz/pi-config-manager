@@ -10,12 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Added read-only custom system prompt, merged appended prompt, and active preset instruction entries directly to the Contexts view.
 - Added effective-prompt presence verification for enabled and disabled skills and context files, including explicit warnings when disabled resources are reintroduced.
+- Added native Pi Prompt Template and Theme inventory, staged toggles, and reload flow.
+- Added discovery and re-enabling of skills disabled by Pi's native resource settings.
 
 ### Changed
 
 - Keep monitor status metadata visible while scrolling captured prompt content.
 - Refresh pre-run prompt previews whenever the manager opens and publish current skill/context counts after policy changes.
 - Filter every duplicate standard skill/context prompt section and report filtering failures on every affected run.
+- Generalize Pi package-resource resolution and settings writes across extensions, skills, prompt templates, and themes while retaining source metadata.
 
 ## [0.2.0] - 2026-08-02
 

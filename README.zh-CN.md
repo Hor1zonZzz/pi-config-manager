@@ -1,6 +1,6 @@
 # Pi Config Manager
 
-在一个可搜索的 TUI 浮层中管理 Pi 的工具、技能、上下文文件、提示词来源与扩展。
+在一个可搜索的 TUI 浮层中管理 Pi 的工具、技能、上下文文件、提示词来源、提示词模板、主题与扩展。
 
 [English](README.md) | 简体中文
 
@@ -8,13 +8,13 @@ Pi Config Manager 是 [Pi Coding Agent](https://github.com/earendil-works/pi) �
 
 ## 主要特性
 
-- 在一个界面中管理 **Tools、Skills、Context Files、Prompt Sources 和 Extensions**
+- 在一个界面中管理 **Tools、Skills、Contexts、Prompt Templates、Themes 和 Extensions**
 - 显示当前真正提供给模型的 Effective 资源状态
 - 可搜索、全键盘操作的浮层，并保留当前对话作为背景
 - 持久化的 **Global** 资源设置，Preset 则隔离在当前 Session 中
 - Context Monitor 可查看所选资源对模型可见提示词的贡献
 - 编辑器上方显示紧凑的资源状态 HUD
-- 根据资源来源，通过 Pi 公开设置 API 保存扩展开关
+- 根据资源来源，通过 Pi 公开设置 API 保存 Package 资源开关
 - 内置命名 Preset，可统一配置模型、思考等级、工具、技能和指令
 - 提供可选运行时策略层事件 API，方便只读模式等扩展接入
 - 无遥测，不发起网络请求
@@ -58,7 +58,7 @@ pi -e npm:pi-config-manager
 2. 按 `Tab` 在资源页签之间切换。
 3. 直接输入文字过滤当前列表。
 4. 按 `Space` 或 `Enter` 在自动选择的目标中切换所选资源。
-5. 在 Extensions 页按 `S` 保存暂存变更并重新加载 Pi。
+5. 暂存 Pi Package 资源变更（包括原生设置禁用的 Skill）后，按 `S` 保存并重新加载。
 
 ### 键盘操作
 
@@ -69,7 +69,7 @@ pi -e npm:pi-config-manager
 | `↑` / `↓` | 移动选择，或滚动已聚焦的 Monitor |
 | `←` / `→` | 聚焦资源列表或 Context Monitor |
 | `Space` / `Enter` | 在当前目标中切换所选资源 |
-| `S` | 保存暂存的扩展变更并重新加载 Pi |
+| `S` | 保存暂存的 Pi Package 资源变更并重新加载 |
 | `Esc` | 关闭管理器 |
 
 支持 Pi 键位配置的操作会遵循当前 TUI keybindings。
@@ -82,6 +82,8 @@ pi -e npm:pi-config-manager
 | `/tools` | 打开 Tools 页 |
 | `/skills` | 打开 Skills 页 |
 | `/contexts` | 管理上下文文件并查看系统提示词来源 |
+| `/prompts` | 管理 Pi 提示词模板 |
+| `/themes` | 管理 Pi 主题 |
 | `/extensions` | 打开 Extensions 页 |
 | `/preset` | 选择或清除命名 Preset |
 | `/preset <名称>` | 直接激活命名 Preset |
@@ -111,7 +113,7 @@ pi -e npm:pi-config-manager
 
 受信任的项目可以在 `.pi/resource-settings.json` 中加入项目专属默认值。可视化界面的 Global 编辑目标只修改 Global 设置；项目文件继续由项目单独维护和纳入版本控制。
 
-扩展开关独立于 Effective 资源视图，因此 Extensions 页显示 **View/Edit: Pi settings**。变更会先在界面中暂存，按 `S` 并确认重新加载后，再根据资源来源写入对应的全局或项目 Pi 设置。
+Prompt Templates、Themes 和 Extensions 的变更独立于 Effective 资源策略视图，因此这些页显示 **View/Edit: Pi settings**。变更会先在界面中暂存，按 `S` 并确认重新加载后，再根据资源来源写入对应的全局或项目 Pi 设置。
 
 ## 各类资源的行为
 
@@ -121,7 +123,9 @@ pi -e npm:pi-config-manager
 
 ### Skills
 
-已禁用的技能会从 Pi 标准系统提示词的技能目录中移除。调用已禁用的 `/skill:<name>` 命令时，也会显示通知并阻止展开。
+已加载的 Skill 使用 Config Manager 的即时 Global/Session/Preset 策略。已禁用的技能会从 Pi 标准系统提示词的技能目录中移除，调用已禁用的 `/skill:<name>` 命令时也会显示通知并阻止展开。
+
+被 Pi 原生 Package 设置禁用的 Skill 仍会显示为 `not loaded by Pi settings`。启用这类 Skill 会先暂存到 Pi 设置，需要按 `S` 保存并重新加载。
 
 ### Contexts 与 Prompt Sources
 
@@ -129,9 +133,13 @@ Contexts 页会把 Pi 的自定义系统提示词、合并后的追加系统提�
 
 Pi 公开的 Extension API 不提供自定义和追加提示词的来源路径，因此 Config Manager 使用通用标签，而不会假定内容一定来自 `SYSTEM.md` 或 `APPEND_SYSTEM.md`。
 
+### Prompt Templates 与 Themes
+
+Prompt Template 和 Theme 开关在保存前只处于暂存状态。Config Manager 通过公开的 `SettingsManager` 写入 Pi 原生顶层或 Package 过滤设置，然后请求 Pi 重新加载。
+
 ### Extensions
 
-扩展开关在保存前只处于暂存状态。Config Manager 通过公开的 `SettingsManager` 写入 Pi 原生扩展/包过滤设置，然后请求 Pi 重新加载。
+扩展开关使用相同的 Pi 设置暂存与重新加载流程。
 
 如果本地包来源直接指向单个扩展文件，Pi 无法为它应用单扩展过滤规则。Config Manager 会报告这个限制，而不是保存一个无效开关。管理器也不会允许在自己的活动界面中禁用自身。
 
@@ -142,7 +150,7 @@ Pi 公开的 Extension API 不提供自定义和追加提示词的来源路径�
 - **Tools：**描述、参数 schema、prompt snippet 与 prompt guidelines
 - **Skills：**该技能在系统提示词目录中的条目
 - **Contexts：**自定义系统提示词、合并后的追加提示词、预设指令，以及每个上下文文件的 `project_context` 贡献
-- **Extensions：**来源、作用域、包来源类型与路径信息
+- **Prompt Templates、Themes 和 Extensions：**配置状态、来源、作用域、Package 来源类型与路径信息
 
 第一次代理运行前，Monitor 会在每次打开管理器时刷新 Pi 当前的提示词预览。运行开始后，它会显示在 `agent_start` 捕获的有效系统提示词，在提示词内容滚动时保持状态信息可见，并根据该提示词验证启用和禁用的 Skills 与 Context Files。若后置扩展重新注入了已禁用资源，界面会报告 `FOUND IN EFFECTIVE PROMPT`。在管理器打开期间做出的策略变更，会在下一次代理运行后反映到捕获的提示词中。
 
@@ -252,7 +260,8 @@ pi.events.emit("config-manager:layer-clear", {
 - Config Manager 是提示词/资源策略工具，不是文件系统或进程沙箱。
 - 技能和上下文过滤依赖 Pi 的标准提示词区段。如果自定义系统提示词删除或重写了这些区段，Config Manager 会保留原提示词，并在每个受影响的运行中提醒用户。有效提示词验证器会报告在 `agent_start` 后仍然可见的禁用资源；这属于检测能力，不是安全沙箱。
 - 可视化管理器只支持 TUI 模式；RPC、JSON 和 print 模式不能打开浮层。
-- 扩展变更需要重新加载 Pi。
+- 静态 Package 清单反映 Pi settings 的解析结果。Pi 0.83 不通过 `ExtensionAPI` 暴露当前 Session 的临时 `--extension` 或 SDK inline extension 清单。
+- Prompt Template、Theme、原生 Skill 加载状态与 Extension 变更需要重新加载 Pi。
 
 ## 开发
 

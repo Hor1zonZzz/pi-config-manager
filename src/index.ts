@@ -2,11 +2,15 @@ import { basename, dirname } from "node:path";
 import {
 	DynamicBorder,
 	formatSkillsForPrompt,
+	getAgentDir,
+	loadSkills,
 	type BuildSystemPromptOptions,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
+	type ResolvedResource,
 	type Skill,
+	type SourceInfo,
 	type Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -25,8 +29,8 @@ import {
 } from "@earendil-works/pi-tui";
 import {
 	isDirectFilePackage,
-	resolveExtensions,
-	saveExtensionChanges,
+	resolvePackageResources,
+	savePackageResourceChanges,
 } from "./extensions";
 import {
 	getHighlightedLineIndexes,
@@ -51,8 +55,9 @@ import {
 import {
 	DEFAULT_SESSION_STATE,
 	type ContextRecord,
-	type ExtensionChange,
 	type ManagerSnapshot,
+	type PackageResourceChange,
+	type PackageResourceKind,
 	type PresetOriginalState,
 	type ResourceSettings,
 	type ResourceTab,
@@ -69,6 +74,8 @@ const TABS: ResourceTab[] = [
 	"tools",
 	"skills",
 	"contexts",
+	"prompts",
+	"themes",
 	"extensions",
 ];
 const LABELS: Record<ResourceTab, string> = {
@@ -76,8 +83,45 @@ const LABELS: Record<ResourceTab, string> = {
 	tools: "Tools",
 	skills: "Skills",
 	contexts: "Contexts",
+	prompts: "Prompt Templates",
+	themes: "Themes",
 	extensions: "Extensions",
 };
+const PACKAGE_RESOURCE_TABS = new Set<ResourceTab>([
+	"prompts",
+	"themes",
+	"extensions",
+]);
+
+function packageKindForTab(
+	tab: ResourceTab,
+): Exclude<PackageResourceKind, "skills"> | undefined {
+	if (tab === "prompts" || tab === "themes" || tab === "extensions") {
+		return tab;
+	}
+	return undefined;
+}
+
+function packageResourceId(
+	kind: PackageResourceKind,
+	resource: ResolvedResource,
+): string {
+	return `${kind}:${resource.path}`;
+}
+
+function resourceSourceDetail(resource: ResolvedResource): string {
+	return `${resource.metadata.scope}/${resource.metadata.origin} · ${resource.metadata.source}\n${resource.path}`;
+}
+
+function resolvedSourceInfo(resource: ResolvedResource): SourceInfo {
+	return {
+		path: resource.path,
+		source: resource.metadata.source,
+		scope: resource.metadata.scope,
+		origin: resource.metadata.origin,
+		baseDir: resource.metadata.baseDir,
+	};
+}
 
 interface PromptPresenceExpectation {
 	shouldBePresent: boolean;
@@ -347,7 +391,7 @@ class ConfigManagerView implements Component, Focusable {
 	constructor(
 		initialTab: ResourceTab,
 		private readonly getSnapshot: () => ManagerSnapshot,
-		private readonly stagedExtensions: Map<string, ExtensionChange>,
+		private readonly stagedPackageResources: Map<string, PackageResourceChange>,
 		private readonly theme: Theme,
 		private readonly keybindings: KeybindingsManager,
 		private readonly onToggle: (tab: ResourceTab, id: string) => void,
@@ -416,7 +460,7 @@ class ConfigManagerView implements Component, Focusable {
 			if (item?.enabled !== undefined) this.onToggle(this.tab, item.id);
 			return;
 		}
-		if (data === "S" && this.tab === "extensions") {
+		if (data === "S" && this.stagedPackageResources.size > 0) {
 			this.onDone("save");
 			return;
 		}
@@ -454,7 +498,7 @@ class ConfigManagerView implements Component, Focusable {
 		);
 		if (safeWidth < 4) return [title];
 		let targetLabel: string;
-		if (this.tab === "extensions") {
+		if (PACKAGE_RESOURCE_TABS.has(this.tab)) {
 			targetLabel = this.theme.fg("success", "View/Edit: Pi settings");
 		} else if (snapshot.presetName) {
 			targetLabel = `${this.theme.fg("accent", "View: Effective")} · ${this.theme.fg("warning", `Edit: Session · ${snapshot.presetName}`)}`;
@@ -484,7 +528,7 @@ class ConfigManagerView implements Component, Focusable {
 		);
 		const targetLine = truncateToWidth(targetLabel, safeWidth);
 		const constraintLine = truncateToWidth(
-			this.tab === "extensions"
+			PACKAGE_RESOURCE_TABS.has(this.tab)
 				? this.theme.fg("dim", "Constraints: n/a")
 				: constraintIds.length > 0
 					? this.theme.fg("warning", `Constraints: ${constraintIds.join(", ")}`)
@@ -549,7 +593,11 @@ class ConfigManagerView implements Component, Focusable {
 			);
 		}
 
-		const saveHint = this.tab === "extensions" ? " · S save + reload" : "";
+		const saveHint =
+			PACKAGE_RESOURCE_TABS.has(this.tab) ||
+			(this.tab === "skills" && snapshot.unloadedSkills.length > 0)
+				? " · S save + reload"
+				: "";
 		lines.push(
 			truncateToWidth(
 				this.theme.fg(
@@ -580,10 +628,9 @@ class ConfigManagerView implements Component, Focusable {
 						? this.theme.fg("success", "● ")
 						: this.theme.fg("dim", "○ ");
 			const lock = item.locked ? this.theme.fg("warning", "🔒 ") : "";
-			const pending =
-				this.tab === "extensions" && this.stagedExtensions.has(item.id)
-					? this.theme.fg("warning", " staged")
-					: "";
+			const pending = this.stagedPackageResources.has(item.id)
+				? this.theme.fg("warning", " staged")
+				: "";
 			return `${cursor}${check}${lock}${item.label}${this.theme.fg("dim", `  ${item.state}`)}${pending}`;
 		});
 	}
@@ -710,9 +757,9 @@ class ConfigManagerView implements Component, Focusable {
 				{
 					id: "skills",
 					label: "Skills",
-					state: `${snapshot.enabledSkills.size}/${snapshot.skills.length}`,
+					state: `${snapshot.enabledSkills.size}/${snapshot.skills.length} loaded · ${snapshot.unloadedSkills.length} unloaded`,
 					detail:
-						"Pi-loaded skills enabled by manager policy. Catalog visibility also depends on read and manual-only metadata.",
+						"Pi-loaded skills use manager policy; skills disabled in Pi settings require reload.",
 				},
 				{
 					id: "contexts",
@@ -722,6 +769,22 @@ class ConfigManagerView implements Component, Focusable {
 						: "loading",
 					detail:
 						"Toggle Pi-loaded context files and inspect read-only system prompt sources.",
+				},
+				{
+					id: "prompts",
+					label: "Prompt Templates",
+					state: snapshot.promptsKnown
+						? `${snapshot.prompts.filter((item) => item.enabled).length}/${snapshot.prompts.length}`
+						: "loading",
+					detail: "Pi-resolved prompt templates. Changes require reload.",
+				},
+				{
+					id: "themes",
+					label: "Themes",
+					state: snapshot.themesKnown
+						? `${snapshot.themes.filter((item) => item.enabled).length}/${snapshot.themes.length}`
+						: "loading",
+					detail: "Pi-resolved themes. Changes require reload.",
 				},
 				{
 					id: "extensions",
@@ -819,8 +882,8 @@ class ConfigManagerView implements Component, Focusable {
 					),
 				};
 			});
-		if (this.tab === "skills")
-			return snapshot.skills.map((skill) => {
+		if (this.tab === "skills") {
+			const loadedItems = snapshot.skills.map((skill) => {
 				const enabled = snapshot.enabledSkills.has(skill.name);
 				const projectLocked =
 					!snapshot.presetName &&
@@ -844,7 +907,9 @@ class ConfigManagerView implements Component, Focusable {
 					enabled,
 					locked: projectLocked,
 					state: `${enabled ? "enabled" : "disabled"}${projectLocked ? " · blocked by project settings" : ""}`,
-					detail: skill.path,
+					detail: skill.sourceInfo
+						? `${sourceDetail(skill.sourceInfo)}\n${skill.path}`
+						: skill.path,
 					monitor: showCapturedSystemPrompt(
 						snapshot,
 						{
@@ -883,6 +948,58 @@ class ConfigManagerView implements Component, Focusable {
 					),
 				};
 			});
+			const unloadedItems = snapshot.unloadedSkills.flatMap((skill) => {
+				const resource = skill.nativeResource;
+				if (!resource) return [];
+				const id = packageResourceId("skills", resource);
+				const staged = this.stagedPackageResources.get(id);
+				const enabled = staged?.enabled ?? false;
+				return [
+					{
+						id,
+						label: skill.name,
+						enabled,
+						state: staged
+							? `${enabled ? "enable" : "disable"} staged · reload required`
+							: "not loaded by Pi settings · reload required",
+						detail: resourceSourceDetail(resource),
+						monitor: showCapturedSystemPrompt(
+							snapshot,
+							{
+								title: `Skill · ${skill.name}`,
+								channel: "system prompt skill catalog",
+								status: "not loaded by Pi settings",
+								statusColor: "dim",
+								content: formatSkillsForPrompt([
+									{
+										name: skill.name,
+										description: skill.description,
+										filePath: skill.path,
+										baseDir: dirname(skill.path),
+										sourceInfo:
+											skill.sourceInfo ?? resolvedSourceInfo(resource),
+										disableModelInvocation: false,
+									} satisfies Skill,
+								]).trim(),
+								highlightTarget: {
+									kind: "skill-fields",
+									skillName: skill.name,
+								},
+								note: "Press Space to stage enabling this skill in Pi settings, then S to save and reload.",
+							},
+							{
+								showFullPrompt: true,
+								expectation: {
+									shouldBePresent: false,
+									stateLabel: "not loaded",
+								},
+							},
+						),
+					},
+				];
+			});
+			return [...loadedItems, ...unloadedItems];
+		}
 		if (this.tab === "contexts") {
 			const contextItems = snapshot.contexts.map((context) => {
 				const enabled = snapshot.enabledContexts.has(context.path);
@@ -924,15 +1041,18 @@ class ConfigManagerView implements Component, Focusable {
 			});
 			return [...getPromptSourceItems(snapshot), ...contextItems];
 		}
-		return snapshot.extensions.map((extension) => {
-			const staged = this.stagedExtensions.get(extension.path);
-			const enabled = staged?.enabled ?? extension.enabled;
+		const packageKind = packageKindForTab(this.tab);
+		if (!packageKind) return [];
+		return snapshot[packageKind].map((resource) => {
+			const id = packageResourceId(packageKind, resource);
+			const staged = this.stagedPackageResources.get(id);
+			const enabled = staged?.enabled ?? resource.enabled;
 			return {
-				id: extension.path,
-				label: basename(extension.path),
+				id,
+				label: basename(resource.path),
 				enabled,
-				state: enabled ? "enabled" : "disabled",
-				detail: `${extension.metadata.scope}/${extension.metadata.origin} · ${extension.metadata.source}\n${extension.path}`,
+				state: `${enabled ? "enabled" : "disabled"} · reload required`,
+				detail: resourceSourceDetail(resource),
 			};
 		});
 	}
@@ -992,18 +1112,23 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		presetInstructions: undefined,
 		contextsKnown: false,
 		extensionsKnown: false,
+		promptsKnown: false,
+		themesKnown: false,
 		tools: [],
 		toolSnippets: {},
 		activeTools: new Set(),
 		runtimeToolControls: new Map(),
 		projectDisabledTools: new Set(),
 		skills: [],
+		unloadedSkills: [],
 		enabledSkills: new Set(),
 		projectDisabledSkills: new Set(),
 		contexts: [],
 		enabledContexts: new Set(),
 		projectDisabledContexts: new Set(),
 		extensions: [],
+		prompts: [],
+		themes: [],
 	};
 
 	function persistSession(): void {
@@ -1361,6 +1486,8 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				description: skill.description ?? "No description",
 				path: skill.path ?? skill.filePath ?? "Path unavailable",
 				disableModelInvocation: skill.disableModelInvocation === true,
+				sourceInfo: skill.sourceInfo,
+				loaded: true,
 			}))
 			.sort((a, b) => a.name.localeCompare(b.name));
 		const contexts: ContextRecord[] = (options.contextFiles ?? []).map(
@@ -1387,18 +1514,58 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		requestHudRender?.();
 	}
 
-	async function refreshExtensions(ctx: ExtensionContext): Promise<void> {
+	async function refreshPackageResources(ctx: ExtensionContext): Promise<void> {
 		try {
-			const extensions = await resolveExtensions(
+			const resources = await resolvePackageResources(
 				ctx.cwd,
 				ctx.isProjectTrusted(),
 			);
-			snapshot = { ...snapshot, extensionsKnown: true, extensions };
+			const loadedSkillPaths = new Set(
+				snapshot.skills.map((skill) => skill.path),
+			);
+			const unloadedSkills = resources.skills
+				.flatMap((resource): SkillRecord[] => {
+					if (resource.enabled || loadedSkillPaths.has(resource.path))
+						return [];
+					const loaded = loadSkills({
+						cwd: ctx.cwd,
+						agentDir: getAgentDir(),
+						skillPaths: [resource.path],
+						includeDefaults: false,
+					}).skills[0];
+					return [
+						{
+							name:
+								loaded?.name ??
+								(basename(resource.path).toLowerCase() === "skill.md"
+									? basename(dirname(resource.path))
+									: basename(resource.path).replace(/\.md$/i, "")),
+							description:
+								loaded?.description ?? "Disabled in Pi resource settings",
+							path: resource.path,
+							disableModelInvocation: loaded?.disableModelInvocation,
+							sourceInfo: resolvedSourceInfo(resource),
+							loaded: false,
+							nativeResource: resource,
+						},
+					];
+				})
+				.sort((a, b) => a.name.localeCompare(b.name));
+			snapshot = {
+				...snapshot,
+				extensionsKnown: true,
+				promptsKnown: true,
+				themesKnown: true,
+				extensions: resources.extensions,
+				prompts: resources.prompts,
+				themes: resources.themes,
+				unloadedSkills,
+			};
 			requestHudRender?.();
 			emitStateChanged();
 		} catch (error) {
 			ctx.ui.notify(
-				`Could not resolve extensions: ${error instanceof Error ? error.message : String(error)}`,
+				`Could not resolve package resources: ${error instanceof Error ? error.message : String(error)}`,
 				"warning",
 			);
 		}
@@ -1419,6 +1586,8 @@ export default function piConfigManager(pi: ExtensionAPI) {
 					path: command.sourceInfo.path,
 					disableModelInvocation:
 						existingSkills.get(name)?.disableModelInvocation,
+					sourceInfo: command.sourceInfo,
+					loaded: true,
 				};
 			})
 			.sort((a, b) => a.name.localeCompare(b.name));
@@ -1438,7 +1607,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			settleTimer = undefined;
 			updateToolsInventory();
 			refreshSkillsFromCommands();
-			void refreshExtensions(ctx);
+			void refreshPackageResources(ctx);
 		}, 500);
 	}
 
@@ -1452,11 +1621,20 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			},
 			skills: {
 				enabled: snapshot.enabledSkills.size,
-				total: snapshot.skills.length,
+				total: snapshot.skills.length + snapshot.unloadedSkills.length,
+				unloaded: snapshot.unloadedSkills.length,
 			},
 			contexts: {
 				enabled: snapshot.enabledContexts.size,
 				total: snapshot.contexts.length,
+			},
+			prompts: {
+				enabled: snapshot.prompts.filter((item) => item.enabled).length,
+				total: snapshot.prompts.length,
+			},
+			themes: {
+				enabled: snapshot.themes.filter((item) => item.enabled).length,
+				total: snapshot.themes.length,
 			},
 			extensions: {
 				enabled: snapshot.extensions.filter((item) => item.enabled).length,
@@ -1466,7 +1644,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	}
 
 	function toggleSessionResource(
-		tab: ResourceTab,
+		tab: ToggleableResourceTab,
 		id: string,
 		ctx: ExtensionContext,
 	): void {
@@ -1573,6 +1751,40 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		requestHudRender?.();
 	}
 
+	function applyToggleableResourceChange(
+		tab: ToggleableResourceTab,
+		id: string,
+		ctx: ExtensionCommandContext,
+	): void {
+		const runtimeControl =
+			tab === "tools" ? snapshot.runtimeToolControls.get(id) : undefined;
+		const projectLocked =
+			!activePresetName &&
+			(tab === "tools"
+				? projectSettings.disabledTools.includes(id)
+				: tab === "skills"
+					? projectSettings.disabledSkills.includes(id)
+					: projectSettings.disabledContexts.includes(id));
+		if (runtimeControl) {
+			ctx.ui.notify(
+				`Tool "${id}" is ${runtimeControl.action === "disable" ? "blocked" : "required"} by runtime constraint "${runtimeControl.layerId}". Clear that constraint before changing its effective state.`,
+				"warning",
+			);
+		} else if (projectLocked) {
+			ctx.ui.notify(
+				`Resource "${id}" is disabled by project settings. Edit .pi/resource-settings.json to change its effective state.`,
+				"warning",
+			);
+		} else if (activePresetName) {
+			toggleSessionResource(tab, id, ctx);
+		} else {
+			setGlobalResource(tab, id, !isResourceEnabled(snapshot, tab, id), ctx);
+		}
+		updatePromptInventory(ctx.getSystemPromptOptions());
+		updateToolsInventory();
+		refreshPromptPreview(ctx);
+	}
+
 	async function showManager(
 		initialTab: ResourceTab,
 		ctx: ExtensionCommandContext,
@@ -1584,77 +1796,69 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		updatePromptInventory(ctx.getSystemPromptOptions());
 		updateToolsInventory();
 		refreshPromptPreview(ctx);
-		await refreshExtensions(ctx);
-		const staged = new Map<string, ExtensionChange>();
+		await refreshPackageResources(ctx);
+		const stagedPackageResources = new Map<string, PackageResourceChange>();
 		const action = await ctx.ui.custom<"close" | "save">(
 			(tui, theme, keybindings, done) =>
 				new ConfigManagerView(
 					initialTab,
 					getManagerSnapshot,
-					staged,
+					stagedPackageResources,
 					theme,
 					keybindings,
 					(tab, id) => {
-						if (tab === "extensions") {
-							const resource = snapshot.extensions.find(
-								(item) => item.path === id,
+						const packageKind = packageKindForTab(tab);
+						if (packageKind) {
+							const resource = snapshot[packageKind].find(
+								(item) => packageResourceId(packageKind, item) === id,
 							);
 							if (!resource) return;
-							if (resource.path.includes("pi-config-manager")) {
+							if (
+								packageKind === "extensions" &&
+								resource.path.includes("pi-config-manager")
+							) {
 								ctx.ui.notify(
 									"Pi Config Manager cannot disable itself from the active manager.",
 									"warning",
 								);
 								return;
 							}
-							if (isDirectFilePackage(resource, ctx.cwd)) {
+							if (
+								packageKind === "extensions" &&
+								isDirectFilePackage(resource, ctx.cwd)
+							) {
 								ctx.ui.notify(
 									"Pi does not support per-extension filters for a package source that directly names one extension file.",
 									"warning",
 								);
 								return;
 							}
-							const current = staged.get(id)?.enabled ?? resource.enabled;
-							staged.set(id, { resource, enabled: !current });
-						} else if (
-							tab === "tools" ||
-							tab === "skills" ||
-							tab === "contexts"
-						) {
-							const runtimeControl =
-								tab === "tools"
-									? snapshot.runtimeToolControls.get(id)
-									: undefined;
-							const projectLocked =
-								!activePresetName &&
-								(tab === "tools"
-									? projectSettings.disabledTools.includes(id)
-									: tab === "skills"
-										? projectSettings.disabledSkills.includes(id)
-										: projectSettings.disabledContexts.includes(id));
-							if (runtimeControl) {
-								ctx.ui.notify(
-									`Tool "${id}" is ${runtimeControl.action === "disable" ? "blocked" : "required"} by runtime constraint "${runtimeControl.layerId}". Clear that constraint before changing its effective state.`,
-									"warning",
-								);
-							} else if (projectLocked) {
-								ctx.ui.notify(
-									`Resource "${id}" is disabled by project settings. Edit .pi/resource-settings.json to change its effective state.`,
-									"warning",
-								);
-							} else if (activePresetName) {
-								toggleSessionResource(tab, id, ctx);
+							const current =
+								stagedPackageResources.get(id)?.enabled ?? resource.enabled;
+							stagedPackageResources.set(id, {
+								kind: packageKind,
+								resource,
+								enabled: !current,
+							});
+						} else if (tab === "skills") {
+							const unloaded = snapshot.unloadedSkills.find(
+								(skill) =>
+									skill.nativeResource &&
+									packageResourceId("skills", skill.nativeResource) === id,
+							);
+							if (unloaded?.nativeResource) {
+								const current =
+									stagedPackageResources.get(id)?.enabled ?? false;
+								stagedPackageResources.set(id, {
+									kind: "skills",
+									resource: unloaded.nativeResource,
+									enabled: !current,
+								});
 							} else {
-								setGlobalResource(
-									tab,
-									id,
-									!isResourceEnabled(snapshot, tab, id),
-									ctx,
-								);
+								applyToggleableResourceChange(tab, id, ctx);
 							}
-							updatePromptInventory(ctx.getSystemPromptOptions());
-							updateToolsInventory();
-							refreshPromptPreview(ctx);
+						} else if (tab === "tools" || tab === "contexts") {
+							applyToggleableResourceChange(tab, id, ctx);
 						}
 						tui.requestRender();
 					},
@@ -1671,22 +1875,22 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				},
 			},
 		);
-		if (action !== "save" || staged.size === 0) return;
+		if (action !== "save" || stagedPackageResources.size === 0) return;
 		const confirmed = await ctx.ui.confirm(
-			"Save extension changes?",
-			"Extension changes require Pi to reload. Save and reload now?",
+			"Save package resource changes?",
+			"Package resource changes require Pi to reload. Save and reload now?",
 		);
 		if (!confirmed) return;
 		try {
-			await saveExtensionChanges(
+			await savePackageResourceChanges(
 				ctx.cwd,
 				ctx.isProjectTrusted(),
-				Array.from(staged.values()),
+				Array.from(stagedPackageResources.values()),
 			);
 			await ctx.reload();
 		} catch (error) {
 			ctx.ui.notify(
-				`Could not save extension settings: ${error instanceof Error ? error.message : String(error)}`,
+				`Could not save package resource settings: ${error instanceof Error ? error.message : String(error)}`,
 				"error",
 			);
 		}
@@ -1714,8 +1918,14 @@ export default function piConfigManager(pi: ExtensionAPI) {
 					const extensionCount = snapshot.extensionsKnown
 						? `${snapshot.extensions.filter((item) => item.enabled).length}/${snapshot.extensions.length}`
 						: "…";
-					const second = `  tools ${snapshot.activeTools.size}/${snapshot.tools.length} · skills ${snapshot.enabledSkills.size}/${snapshot.skills.length} · contexts ${contextCount}`;
-					const third = `  extensions ${extensionCount}${snapshot.presetName ? ` · preset ${snapshot.presetName}` : ""}`;
+					const promptCount = snapshot.promptsKnown
+						? `${snapshot.prompts.filter((item) => item.enabled).length}/${snapshot.prompts.length}`
+						: "…";
+					const themeCount = snapshot.themesKnown
+						? `${snapshot.themes.filter((item) => item.enabled).length}/${snapshot.themes.length}`
+						: "…";
+					const second = `  tools ${snapshot.activeTools.size}/${snapshot.tools.length} · skills ${snapshot.enabledSkills.size}/${snapshot.skills.length}+${snapshot.unloadedSkills.length} unloaded · contexts ${contextCount}`;
+					const third = `  extensions ${extensionCount} · prompts ${promptCount} · themes ${themeCount}${snapshot.presetName ? ` · preset ${snapshot.presetName}` : ""}`;
 					return [
 						first,
 						truncateToWidth(theme.fg("muted", second), width),
@@ -1756,12 +1966,20 @@ export default function piConfigManager(pi: ExtensionAPI) {
 
 	pi.registerCommand("config-manager", {
 		description:
-			"Manage Pi tools, skills, contexts, prompt sources, and extensions",
+			"Manage Pi tools, skills, contexts, prompts, themes, and extensions",
 		handler: async (_args, ctx) => showManager("overview", ctx),
 	});
 	registerResourceCommand("tools", "tools", "tools");
 	registerResourceCommand("skills", "skills", "skills");
 	registerResourceCommand("contexts", "contexts", "contexts");
+	pi.registerCommand("prompts", {
+		description: "Manage Pi prompt templates",
+		handler: async (_args, ctx) => showManager("prompts", ctx),
+	});
+	pi.registerCommand("themes", {
+		description: "Manage Pi themes",
+		handler: async (_args, ctx) => showManager("themes", ctx),
+	});
 	pi.registerCommand("extensions", {
 		description: "Manage Pi extensions",
 		handler: async (_args, ctx) => showManager("extensions", ctx),
@@ -1949,9 +2167,14 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			effectiveSystemPrompt: undefined,
 			contextsKnown: false,
 			extensionsKnown: false,
+			promptsKnown: false,
+			themesKnown: false,
 			skills: [],
+			unloadedSkills: [],
 			contexts: [],
 			extensions: [],
+			prompts: [],
+			themes: [],
 			presetName: activePresetName,
 		};
 		updateToolsInventory();
