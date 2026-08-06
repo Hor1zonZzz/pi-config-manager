@@ -39,6 +39,7 @@
   ],
   "scripts": {
     "test": "bun test",
+    "test:sdk": "bun test tests/pi-sdk.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test && npm run check:package",
     "check:package": "bash ./scripts/check-package.sh"
