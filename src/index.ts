@@ -375,10 +375,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		});
 	}
 
-	registerManagerCommands(pi, presetController, {
-		showManager,
-		setGlobalResource,
-	});
+	registerManagerCommands(pi, presetController, { showManager });
 
 	pi.events.on("config-manager:layer-set", (event) => {
 		toolController.handleLayerSet(event);

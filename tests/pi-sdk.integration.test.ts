@@ -13,6 +13,7 @@ import {
 	createKeybindings,
 	createTestEnvironment,
 	createTheme,
+	navigateToManagerTab,
 } from "./helpers/config-manager-harness";
 
 const env = createTestEnvironment();
@@ -67,6 +68,7 @@ function createInteractiveUi(rendered: string[]) {
 					result = value;
 				},
 			);
+			navigateToManagerTab(component, "contexts");
 			for (let index = 0; index < 4; index += 1) {
 				rendered.push(component.render(180).join("\n"));
 				if (index === 2) {
@@ -191,18 +193,11 @@ function expectIntegratedBehavior(
 			}),
 		]),
 	);
-	expect(capture.commands).toEqual(
-		expect.arrayContaining([
-			"config-manager",
-			"contexts",
-			"extensions",
-			"preset",
-			"prompts",
-			"skills",
-			"themes",
-			"tools",
-		]),
-	);
+	expect(
+		capture.commands
+			.filter((name) => name !== "__config-manager-sdk-probe")
+			.sort(),
+	).toEqual(["config-manager", "preset"]);
 	const output = rendered.join("\n");
 	for (const marker of [
 		"[Contexts]",
@@ -222,7 +217,7 @@ function expectIntegratedBehavior(
 }
 
 describe("real Pi SDK integration", () => {
-	test("loads Pi prompt resources and exposes them through /contexts", async () => {
+	test("loads Pi prompt resources and exposes them through /config-manager", async () => {
 		const capture: ProbeCapture = { commands: [] };
 		const { loader, settingsManager } = await createLoadedResources(capture);
 		expectLoadedPromptResources(loader);
@@ -243,7 +238,7 @@ describe("real Pi SDK integration", () => {
 				onError: (error) => extensionErrors.push(error),
 			});
 			await session.prompt("/__config-manager-sdk-probe");
-			await session.prompt("/contexts");
+			await session.prompt("/config-manager");
 			expectIntegratedBehavior(
 				capture,
 				rendered,

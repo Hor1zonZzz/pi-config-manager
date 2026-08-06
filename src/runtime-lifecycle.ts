@@ -66,7 +66,7 @@ export class RuntimeLifecycleController {
 			return;
 		}
 		ctx.ui.notify(
-			`Skill "${name}" is disabled. Use /skills to enable it.`,
+			`Skill "${name}" is disabled. Use /config-manager to enable it.`,
 			"warning",
 		);
 		return { action: "handled" as const };

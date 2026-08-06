@@ -6,58 +6,11 @@ import { Key } from "@earendil-works/pi-tui";
 import type { PresetController } from "./preset-controller";
 import type { ResourceTab } from "./types";
 
-type PersistentResourceKind = "tools" | "skills" | "contexts";
-
 interface ManagerCommandHandlers {
 	showManager: (
 		tab: ResourceTab,
 		ctx: ExtensionCommandContext,
 	) => Promise<void>;
-	setGlobalResource: (
-		kind: PersistentResourceKind,
-		name: string,
-		enabled: boolean,
-		ctx: ExtensionCommandContext,
-	) => void;
-}
-
-function registerResourceCommand(
-	pi: ExtensionAPI,
-	name: PersistentResourceKind,
-	handlers: ManagerCommandHandlers,
-): void {
-	pi.registerCommand(name, {
-		description: `Manage ${name} through Pi Config Manager`,
-		handler: async (args, ctx) => {
-			const parts = args.trim().split(/\s+/).filter(Boolean);
-			if (
-				parts[0] === "global" &&
-				(parts[1] === "enable" || parts[1] === "disable") &&
-				parts[2]
-			) {
-				handlers.setGlobalResource(
-					name,
-					parts.slice(2).join(" "),
-					parts[1] === "enable",
-					ctx,
-				);
-				return;
-			}
-			await handlers.showManager(name, ctx);
-		},
-	});
-}
-
-function registerStaticResourceCommand(
-	pi: ExtensionAPI,
-	name: "prompts" | "themes" | "extensions",
-	description: string,
-	handlers: ManagerCommandHandlers,
-): void {
-	pi.registerCommand(name, {
-		description,
-		handler: async (_args, ctx) => handlers.showManager(name, ctx),
-	});
 }
 
 export function registerManagerCommands(
@@ -70,22 +23,6 @@ export function registerManagerCommands(
 			"Manage Pi tools, skills, contexts, prompts, themes, and extensions",
 		handler: async (_args, ctx) => handlers.showManager("overview", ctx),
 	});
-	registerResourceCommand(pi, "tools", handlers);
-	registerResourceCommand(pi, "skills", handlers);
-	registerResourceCommand(pi, "contexts", handlers);
-	registerStaticResourceCommand(
-		pi,
-		"prompts",
-		"Manage Pi prompt templates",
-		handlers,
-	);
-	registerStaticResourceCommand(pi, "themes", "Manage Pi themes", handlers);
-	registerStaticResourceCommand(
-		pi,
-		"extensions",
-		"Manage Pi extensions",
-		handlers,
-	);
 	pi.registerCommand("preset", {
 		description: "Switch preset configuration",
 		handler: async (args, ctx) => {

@@ -78,23 +78,9 @@ pi -e npm:pi-config-manager
 
 | 命令 | 说明 |
 | --- | --- |
-| `/config-manager` | 打开统一概览 |
-| `/tools` | 打开 Tools 页 |
-| `/skills` | 打开 Skills 页 |
-| `/contexts` | 管理上下文文件并查看系统提示词来源 |
-| `/prompts` | 管理 Pi 提示词模板 |
-| `/themes` | 管理 Pi 主题 |
-| `/extensions` | 打开 Extensions 页 |
+| `/config-manager` | 打开统一资源管理器 |
 | `/preset` | 选择或清除命名 Preset |
 | `/preset <名称>` | 直接激活命名 Preset |
-
-也可以直接修改全局默认值：
-
-```text
-/tools global enable|disable <tool-name>
-/skills global enable|disable <skill-name>
-/contexts global enable|disable <absolute-path>
-```
 
 ## Effective 视图与自动编辑目标
 

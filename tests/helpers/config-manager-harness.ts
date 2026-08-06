@@ -61,6 +61,32 @@ export function createTheme() {
 	};
 }
 
+export function navigateToManagerTab(
+	component: { handleInput(data: string): void },
+	tab:
+		| "overview"
+		| "tools"
+		| "skills"
+		| "contexts"
+		| "prompts"
+		| "themes"
+		| "extensions",
+): void {
+	const tabs = [
+		"overview",
+		"tools",
+		"skills",
+		"contexts",
+		"prompts",
+		"themes",
+		"extensions",
+	] as const;
+	const tabIndex = tabs.indexOf(tab);
+	for (let index = 0; index < tabIndex; index += 1) {
+		component.handleInput("tab");
+	}
+}
+
 export function createKeybindings() {
 	const bindings: Record<string, string[]> = {
 		"tui.select.cancel": ["escape", "ctrl+c"],

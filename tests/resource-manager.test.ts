@@ -5,6 +5,7 @@ import {
 	createKeybindings,
 	createTestEnvironment,
 	createTheme,
+	navigateToManagerTab,
 } from "./helpers/config-manager-harness";
 
 const env = createTestEnvironment();
@@ -47,6 +48,7 @@ describe("resource manager behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "tools");
 				rendered = component.render(100);
 				component.handleInput("right");
 				component.handleInput("down");
@@ -57,7 +59,7 @@ describe("resource manager behavior", () => {
 				return result;
 			});
 
-			await harness.commands.get("tools").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(overlayOptions).toEqual({
 				overlay: true,
 				overlayOptions: {
@@ -127,12 +129,13 @@ describe("resource manager behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "tools");
 				component.handleInput(" ");
 				component.handleInput("escape");
 				return result;
 			});
 
-			await harness.commands.get("tools").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(harness.getActiveTools().sort()).toEqual([
 				"ast_grep_search",
 				"read",
@@ -187,6 +190,7 @@ describe("resource manager behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "tools");
 				rendered = component.render(100).join("\n");
 				component.handleInput(" ");
 				component.handleInput("tab");
@@ -199,7 +203,7 @@ describe("resource manager behavior", () => {
 				return result;
 			});
 
-			await harness.commands.get("tools").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(rendered).toContain("View: Effective");
 			expect(rendered).toContain("Edit: Session · focus");
 			expect(rendered).not.toContain("G target");
@@ -254,11 +258,12 @@ describe("resource manager behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "contexts");
 				component.handleInput(" ");
 				component.handleInput("escape");
 				return result;
 			});
-			await harness.commands.get("contexts").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			let state = harness.entries
 				.filter((entry) => entry.customType === "pi-config-manager-state")
 				.at(-1)?.data;
@@ -326,13 +331,14 @@ describe("resource manager behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "skills");
 				rendered = component.render(100).join("\n");
 				component.handleInput(" ");
 				component.handleInput("escape");
 				return result;
 			});
 
-			await harness.commands.get("skills").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(rendered).toContain("View: Effective");
 			expect(rendered).toContain("Edit: Global");
 			expect(readResourceSettings()).toEqual({

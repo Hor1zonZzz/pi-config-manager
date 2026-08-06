@@ -78,23 +78,9 @@ Keybinding-aware actions follow Pi's configured TUI keybindings.
 
 | Command | Description |
 | --- | --- |
-| `/config-manager` | Open the unified overview |
-| `/tools` | Open the Tools tab |
-| `/skills` | Open the Skills tab |
-| `/contexts` | Manage context files and inspect system prompt sources |
-| `/prompts` | Manage Pi prompt templates |
-| `/themes` | Manage Pi themes |
-| `/extensions` | Open the Extensions tab |
+| `/config-manager` | Open the unified resource manager |
 | `/preset` | Select or clear a named preset |
 | `/preset <name>` | Activate a named preset directly |
-
-Global defaults can also be changed directly:
-
-```text
-/tools global enable|disable <tool-name>
-/skills global enable|disable <skill-name>
-/contexts global enable|disable <absolute-path>
-```
 
 ## Effective view and automatic edit target
 

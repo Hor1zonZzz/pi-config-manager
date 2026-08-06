@@ -7,6 +7,7 @@ import {
 	createTestEnvironment,
 	createTheme,
 	formatContextSection,
+	navigateToManagerTab,
 	type ContextFixture,
 	type SkillFixture,
 } from "./helpers/config-manager-harness";
@@ -152,6 +153,7 @@ describe("prompt and context behavior", () => {
 						resultValue = value;
 					},
 				);
+				navigateToManagerTab(component, "contexts");
 				for (let index = 0; index < 4; index += 1) {
 					rendered.push(component.render(180).join("\n"));
 					component.handleInput("down");
@@ -160,7 +162,7 @@ describe("prompt and context behavior", () => {
 				return resultValue;
 			});
 
-			await harness.commands.get("contexts").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			const output = rendered.join("\n");
 			expect(output).toContain("[Contexts]");
 			expect(output).toContain("Custom System Prompt");
@@ -204,12 +206,13 @@ describe("prompt and context behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "contexts");
 				rendered = component.render(180).join("\n");
 				component.handleInput("escape");
 				return result;
 			});
 
-			await harness.commands.get("contexts").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(rendered).toContain("[Contexts]");
 			expect(rendered).toContain("Appended System Prompt");
 			expect(rendered).toContain("APPEND ONLY");
@@ -263,6 +266,7 @@ describe("prompt and context behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "contexts");
 				for (let index = 0; index < contexts.length; index += 1) {
 					rendered.push(component.render(180).join("\n"));
 					component.handleInput("down");
@@ -271,7 +275,7 @@ describe("prompt and context behavior", () => {
 				return result;
 			});
 
-			await harness.commands.get("contexts").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			const output = rendered.join("\n");
 			expect(output).toContain("enabled · found in effective prompt");
 			expect(output).toContain("enabled · NOT FOUND in effective prompt");
@@ -330,12 +334,13 @@ describe("prompt and context behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "skills");
 				rendered = component.render(180).join("\n");
 				component.handleInput("escape");
 				return result;
 			});
 
-			await harness.commands.get("skills").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(rendered).toContain("disabled · FOUND IN EFFECTIVE PROMPT");
 		} finally {
 			await harness.shutdown();
@@ -469,14 +474,15 @@ describe("prompt and context behavior", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "tools");
 				rendered.push(component.render(180).join("\n"));
 				component.handleInput("escape");
 				return result;
 			});
 
-			await harness.commands.get("tools").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			harness.setSystemPrompt("SECOND PREVIEW");
-			await harness.commands.get("tools").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(rendered[0]).toContain("FIRST PREVIEW");
 			expect(rendered[1]).toContain("SECOND PREVIEW");
 			expect(rendered[1]).not.toContain("FIRST PREVIEW");
@@ -503,18 +509,29 @@ describe("prompt and context behavior", () => {
 		});
 		await harness.start();
 		try {
-			harness.setCustomImplementation(async () => "close");
-			await harness.commands.get("contexts").handler("", harness.ctx);
-			await harness.commands
-				.get("skills")
-				.handler("global disable alpha", harness.ctx);
+			let targetTab: "skills" | "contexts" = "skills";
+			harness.setCustomImplementation(async (factory) => {
+				let result: "close" | "save" = "close";
+				const component = await factory(
+					{ requestRender() {} },
+					createTheme(),
+					createKeybindings(),
+					(value: "close" | "save") => {
+						result = value;
+					},
+				);
+				navigateToManagerTab(component, targetTab);
+				component.handleInput(" ");
+				component.handleInput("escape");
+				return result;
+			});
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			let state = harness.emissions
 				.filter((event) => event.name === "config-manager:state-changed")
 				.at(-1)?.data;
 			expect(state.skills).toEqual({ enabled: 0, total: 1, unloaded: 0 });
-			await harness.commands
-				.get("contexts")
-				.handler(`global disable ${context.path}`, harness.ctx);
+			targetTab = "contexts";
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			state = harness.emissions
 				.filter((event) => event.name === "config-manager:state-changed")
 				.at(-1)?.data;

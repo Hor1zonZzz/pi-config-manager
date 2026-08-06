@@ -7,6 +7,7 @@ import {
 	createKeybindings,
 	createTestEnvironment,
 	createTheme,
+	navigateToManagerTab,
 	type SkillFixture,
 } from "./helpers/config-manager-harness";
 
@@ -72,13 +73,7 @@ describe("manager behavior contract", () => {
 		try {
 			expect([...harness.commands.keys()].sort()).toEqual([
 				"config-manager",
-				"contexts",
-				"extensions",
 				"preset",
-				"prompts",
-				"skills",
-				"themes",
-				"tools",
 			]);
 			expect(harness.flags.has("preset")).toBe(true);
 			expect(harness.shortcuts.size).toBe(1);
@@ -105,6 +100,7 @@ describe("manager behavior contract", () => {
 		await harness.start();
 		try {
 			const rendered: string[] = [];
+			let targetTab: "prompts" | "themes" = "prompts";
 			harness.setCustomImplementation(async (factory) => {
 				let result: "close" | "save" = "close";
 				const component = await factory(
@@ -115,6 +111,7 @@ describe("manager behavior contract", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, targetTab);
 				rendered.push(component.render(180).join("\n"));
 				component.handleInput(" ");
 				rendered.push(component.render(180).join("\n"));
@@ -122,10 +119,11 @@ describe("manager behavior contract", () => {
 				return result;
 			});
 
-			await harness.commands.get("prompts").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(readAgentSettings().prompts).toEqual(["-prompts/review.md"]);
 			expect(harness.getReloads()).toBe(1);
-			await harness.commands.get("themes").handler("", harness.ctx);
+			targetTab = "themes";
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(readAgentSettings().themes).toEqual(["-themes/fixture.json"]);
 			expect(harness.getReloads()).toBe(2);
 			const output = rendered.join("\n");
@@ -162,6 +160,7 @@ describe("manager behavior contract", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "skills");
 				renderedBefore = component.render(180).join("\n");
 				component.handleInput(" ");
 				renderedAfter = component.render(180).join("\n");
@@ -169,7 +168,7 @@ describe("manager behavior contract", () => {
 				return result;
 			});
 
-			await harness.commands.get("skills").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(renderedBefore).toContain("hidden");
 			expect(renderedBefore).toContain(
 				"not loaded by Pi settings · reload required",
@@ -291,6 +290,7 @@ describe("manager behavior contract", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "tools");
 				rendered = component.render(180).join("\n");
 				renderedNarrow = component.render(72).join("\n");
 				component.handleInput(" ");
@@ -300,7 +300,7 @@ describe("manager behavior contract", () => {
 				return result;
 			});
 
-			await harness.commands.get("tools").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(rendered).toContain("View: Effective");
 			expect(rendered).toContain("Edit: Global");
 			expect(rendered).toContain("Constraints: plan-mode");
@@ -380,6 +380,7 @@ describe("manager behavior contract", () => {
 						result = value;
 					},
 				);
+				navigateToManagerTab(component, "tools");
 				rendered.push(component.render(180).join("\n"));
 				component.handleInput(" ");
 				component.handleInput("tab");
@@ -392,7 +393,7 @@ describe("manager behavior contract", () => {
 				return result;
 			});
 
-			await harness.commands.get("tools").handler("", harness.ctx);
+			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(harness.getActiveTools()).toEqual(["read"]);
 			expect(rendered[0]).toContain("Constraints: project settings");
 			expect(rendered[0]).toContain(
