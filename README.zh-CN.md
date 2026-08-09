@@ -115,9 +115,11 @@ Prompt Templates、Themes 和 Extensions 的变更独立于 Effective 资源策�
 
 ### Contexts 与 Prompt Sources
 
-Contexts 页会把 Pi 的自定义系统提示词、合并后的追加系统提示词和当前预设指令作为只读条目，与可单独切换的上下文文件放在一起。已禁用的上下文文件会从 Pi 标准的 `project_context` 提示词区段中移除。该设置只控制模型可见的提示词内容，**不会**阻止工具直接读取一个已知文件路径。
+Contexts 页把 Pi 的自定义系统提示词、合并后的追加系统提示词和当前预设指令归入 **System Prompt Sources**，把可单独切换的 `AGENTS.md`/`CLAUDE.md` 输入归入 **Context Files**，并在 **Effective Prompt** 中提供最近一次完整提示词。已禁用的上下文文件会从 Pi 标准的 `project_context` 提示词区段中移除。该设置只控制模型可见的提示词内容，**不会**阻止工具直接读取一个已知文件路径。
 
-Pi 公开的 Extension API 不提供自定义和追加提示词的来源路径，因此 Config Manager 使用通用标签，而不会假定内容一定来自 `SYSTEM.md` 或 `APPEND_SYSTEM.md`。
+Resources HUD 会把自定义系统提示词、合并后的追加系统提示词以及所有已加载的上下文文件统一计入 `contexts n/n`。Preset Instructions 是 Config Manager 生成的合成输入，不计入已加载文件。
+
+Pi 公开的 Extension API 不提供自定义和追加提示词的来源路径，因此 Config Manager 使用通用标签，而不会假定内容一定来自 `SYSTEM.md` 或 `APPEND_SYSTEM.md`。当 Pi 合并了多个文件、CLI 或 SDK 追加输入时，合并后的 append 通道只能按一个上下文资源统计。
 
 ### Prompt Templates 与 Themes
 
@@ -135,7 +137,7 @@ Prompt Template 和 Theme 开关在保存前只处于暂存状态。Config Manag
 
 - **Tools：**描述、参数 schema、prompt snippet 与 prompt guidelines
 - **Skills：**该技能在系统提示词目录中的条目
-- **Contexts：**自定义系统提示词、合并后的追加提示词、预设指令，以及每个上下文文件的 `project_context` 贡献
+- **Contexts：**分组后的系统提示词来源、每个上下文文件的 `project_context` 贡献，以及独立的完整 Effective Prompt 条目
 - **Prompt Templates、Themes 和 Extensions：**配置状态、来源、作用域、Package 来源类型与路径信息
 
 第一次代理运行前，Monitor 会在每次打开管理器时刷新 Pi 当前的提示词预览。运行开始后，它会显示在 `agent_start` 捕获的有效系统提示词，在提示词内容滚动时保持状态信息可见，并根据该提示词验证启用和禁用的 Skills 与 Context Files。若后置扩展重新注入了已禁用资源，界面会报告 `FOUND IN EFFECTIVE PROMPT`。在管理器打开期间做出的策略变更，会在下一次代理运行后反映到捕获的提示词中。

@@ -6,7 +6,9 @@ import {
 	type SourceInfo,
 } from "@earendil-works/pi-coding-agent";
 import {
+	countLoadedContextResources,
 	formatContextSection,
+	getEffectivePromptItem,
 	getPromptSourceItems,
 	showCapturedSystemPrompt,
 	type ViewItem,
@@ -70,10 +72,7 @@ function enabledCount(resources: ResolvedResource[]): string {
 }
 
 function buildOverviewItems(snapshot: ManagerSnapshot): ViewItem[] {
-	const promptSourceCount =
-		Number(Boolean(snapshot.customSystemPrompt)) +
-		Number(Boolean(snapshot.appendedSystemPrompt)) +
-		Number(Boolean(snapshot.presetInstructions));
+	const contextResources = countLoadedContextResources(snapshot);
 	return [
 		{
 			id: "tools",
@@ -92,10 +91,10 @@ function buildOverviewItems(snapshot: ManagerSnapshot): ViewItem[] {
 			id: "contexts",
 			label: "Contexts",
 			state: snapshot.contextsKnown
-				? `${snapshot.enabledContexts.size}/${snapshot.contexts.length} files · ${promptSourceCount} prompt sources`
+				? `${contextResources.enabled}/${contextResources.total} loaded context resources`
 				: "loading",
 			detail:
-				"Toggle Pi-loaded context files and inspect read-only system prompt sources.",
+				"Includes SYSTEM, merged APPEND_SYSTEM, and Pi-loaded context files; preset instructions remain a separate synthetic source.",
 		},
 		{
 			id: "prompts",
@@ -410,6 +409,7 @@ function buildContextItem(
 	return {
 		id: context.path,
 		label: basename(context.path),
+		group: "Context Files",
 		enabled,
 		locked: projectLocked,
 		state: `${enabled ? "enabled" : "disabled"}${projectLocked ? " · blocked by project settings" : ""}`,
@@ -442,9 +442,11 @@ function buildContextItem(
 }
 
 function buildContextItems(snapshot: ManagerSnapshot): ViewItem[] {
+	const effectivePrompt = getEffectivePromptItem(snapshot);
 	return [
 		...getPromptSourceItems(snapshot),
 		...snapshot.contexts.map((context) => buildContextItem(snapshot, context)),
+		...(effectivePrompt ? [effectivePrompt] : []),
 	];
 }
 

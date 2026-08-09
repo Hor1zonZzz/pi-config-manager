@@ -11,6 +11,7 @@ import {
 	truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { ConfigManagerView } from "./config-manager-view";
+import { countLoadedContextResources } from "./context-monitor";
 import { packageKindForTab, packageResourceId } from "./resource-view-items";
 import { isDirectFilePackage, savePackageResourceChanges } from "./extensions";
 import { describePreset, type PresetsConfig } from "./presets";
@@ -275,8 +276,9 @@ export function installResourceHud(
 					theme.fg("accent", theme.bold("Resources")),
 					Math.max(1, width),
 				);
+				const contextResources = countLoadedContextResources(snapshot);
 				const contextCount = snapshot.contextsKnown
-					? `${snapshot.enabledContexts.size}/${snapshot.contexts.length}`
+					? `${contextResources.enabled}/${contextResources.total}`
 					: "…";
 				const extensionCount = snapshot.extensionsKnown
 					? `${snapshot.extensions.filter((item) => item.enabled).length}/${snapshot.extensions.length}`

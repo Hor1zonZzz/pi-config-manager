@@ -28,11 +28,29 @@ interface CapturedPromptOptions {
 export interface ViewItem {
 	id: string;
 	label: string;
+	group?: "System Prompt Sources" | "Context Files" | "Effective Prompt";
 	enabled?: boolean;
 	locked?: boolean;
 	state: string;
 	detail: string;
 	monitor?: MonitorPayload;
+}
+
+export interface ContextResourceCount {
+	enabled: number;
+	total: number;
+}
+
+export function countLoadedContextResources(
+	snapshot: ManagerSnapshot,
+): ContextResourceCount {
+	const loadedPromptFiles =
+		Number(Boolean(snapshot.customSystemPrompt)) +
+		Number(Boolean(snapshot.appendedSystemPrompt));
+	return {
+		enabled: snapshot.enabledContexts.size + loadedPromptFiles,
+		total: snapshot.contexts.length + loadedPromptFiles,
+	};
 }
 
 export function formatContextSection(files: ContextRecord[]): string {
@@ -122,6 +140,7 @@ function createPromptSourceItem(
 	return {
 		id: options.id,
 		label: options.label,
+		group: "System Prompt Sources",
 		state: options.state,
 		detail: options.detail,
 		monitor: showCapturedSystemPrompt(
@@ -197,3 +216,33 @@ export function getPromptSourceItems(snapshot: ManagerSnapshot): ViewItem[] {
 	return items;
 }
 
+export function getEffectivePromptItem(
+	snapshot: ManagerSnapshot,
+): ViewItem | undefined {
+	const captured = snapshot.effectiveSystemPrompt;
+	if (!captured) return undefined;
+	const final = captured.source === "agent-start";
+	return {
+		id: "effective-system-prompt",
+		label: final ? "Effective System Prompt" : "Current Prompt Preview",
+		group: "Effective Prompt",
+		state: final ? "captured after latest agent start" : "before agent run",
+		detail: final
+			? "Final system prompt after before_agent_start handlers."
+			: "Current base prompt preview; later extension handlers may still modify it.",
+		monitor: {
+			title: final ? "Effective System Prompt" : "Current Prompt Preview",
+			channel: final
+				? "effective Pi system prompt"
+				: "current Pi system prompt preview",
+			status: final
+				? "captured after the latest agent start"
+				: "captured before an agent run",
+			statusColor: final ? "success" : "dim",
+			content: captured.content,
+			note: final
+				? "This includes chained before_agent_start system-prompt changes from the latest run."
+				: "This has not passed through the next turn's before_agent_start handlers.",
+		},
+	};
+}

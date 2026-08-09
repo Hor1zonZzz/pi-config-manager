@@ -384,14 +384,35 @@ export class ConfigManagerView implements Component, Focusable {
 	private renderResourceRows(items: ViewItem[], height: number): string[] {
 		if (items.length === 0)
 			return [this.theme.fg("muted", "  No matching resources")];
+		const rows: Array<
+			| { kind: "group"; label: string }
+			| { kind: "item"; item: ViewItem; itemIndex: number }
+		> = [];
+		let previousGroup: string | undefined;
+		for (const [itemIndex, item] of items.entries()) {
+			if (item.group && item.group !== previousGroup) {
+				rows.push({ kind: "group", label: item.group });
+			}
+			previousGroup = item.group;
+			rows.push({ kind: "item", item, itemIndex });
+		}
+		const selectedRow = Math.max(
+			0,
+			rows.findIndex(
+				(row) => row.kind === "item" && row.itemIndex === this.selected,
+			),
+		);
 		const start = Math.max(
 			0,
-			Math.min(this.selected - Math.floor(height / 2), items.length - height),
+			Math.min(selectedRow - Math.floor(height / 2), rows.length - height),
 		);
-		return items.slice(start, start + height).map((item, offset) => {
-			const index = start + offset;
+		return rows.slice(start, start + height).map((row) => {
+			if (row.kind === "group") {
+				return this.theme.fg("accent", this.theme.bold(`  ${row.label}`));
+			}
+			const { item, itemIndex } = row;
 			const cursor =
-				index === this.selected ? this.theme.fg("accent", "> ") : "  ";
+				itemIndex === this.selected ? this.theme.fg("accent", "> ") : "  ";
 			let check = "  ";
 			if (item.enabled === true) check = this.theme.fg("success", "● ");
 			if (item.enabled === false) check = this.theme.fg("dim", "○ ");

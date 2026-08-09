@@ -165,6 +165,9 @@ describe("prompt and context behavior", () => {
 			await harness.commands.get("config-manager").handler("", harness.ctx);
 			const output = rendered.join("\n");
 			expect(output).toContain("[Contexts]");
+			expect(output).toContain("System Prompt Sources");
+			expect(output).toContain("Context Files");
+			expect(output).toContain("Effective Prompt");
 			expect(output).toContain("Custom System Prompt");
 			expect(output).toContain("CUSTOM SYSTEM PROMPT");
 			expect(output).toContain("Appended System Prompt");
@@ -177,6 +180,49 @@ describe("prompt and context behavior", () => {
 			expect(output).toContain(
 				"source paths unavailable through Extension API",
 			);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	test("counts SYSTEM, APPEND_SYSTEM, and context files together", async () => {
+		const context = { path: "/project/AGENTS.md", content: "instructions" };
+		const promptOptions = {
+			customPrompt: "CUSTOM",
+			appendSystemPrompt: "APPENDED",
+			selectedTools: ["read"],
+			toolSnippets: {},
+			skills: [],
+			contextFiles: [context],
+		};
+		const harness = createHarness({ promptOptions });
+		await harness.start();
+		try {
+			await harness.trigger("before_agent_start", {
+				systemPrompt: `CUSTOM\n\nAPPENDED${formatContextSection([context])}`,
+				systemPromptOptions: promptOptions,
+			});
+			const widgetFactory = harness.widgets.get("pi-config-manager");
+			const widget = widgetFactory({ requestRender() {} }, createTheme());
+			expect(widget.render(180).join("\n")).toContain("contexts 3/3");
+
+			let overview = "";
+			harness.setCustomImplementation(async (factory) => {
+				let result: "close" | "save" = "close";
+				const component = await factory(
+					{ requestRender() {} },
+					createTheme(),
+					createKeybindings(),
+					(value: "close" | "save") => {
+						result = value;
+					},
+				);
+				overview = component.render(180).join("\n");
+				component.handleInput("escape");
+				return result;
+			});
+			await harness.commands.get("config-manager").handler("", harness.ctx);
+			expect(overview).toContain("Contexts  3/3 loaded context resources");
 		} finally {
 			await harness.shutdown();
 		}

@@ -115,9 +115,11 @@ Skills disabled by Pi's native package settings are still listed as `not loaded 
 
 ### Contexts and Prompt Sources
 
-The Contexts tab lists Pi's custom system prompt, merged appended system prompt, and active preset instructions as read-only entries alongside individually toggleable context files. Disabled context files are removed from Pi's standard `project_context` prompt block. This controls model-visible prompt content; it does **not** prevent tools from reading a known file path.
+The Contexts tab groups Pi's custom system prompt, merged appended system prompt, and active preset instructions under **System Prompt Sources**, individually toggleable `AGENTS.md`/`CLAUDE.md` inputs under **Context Files**, and the latest complete prompt under **Effective Prompt**. Disabled context files are removed from Pi's standard `project_context` prompt block. This controls model-visible prompt content; it does **not** prevent tools from reading a known file path.
 
-Pi's public Extension API does not expose source paths for custom or appended prompt text, so Config Manager labels those entries generically instead of assuming they came from `SYSTEM.md` or `APPEND_SYSTEM.md`.
+The resource HUD counts custom system prompt text, merged appended system prompt text, and every loaded context file together in `contexts n/n`. Preset instructions are synthetic Config Manager input and are not counted as loaded files.
+
+Pi's public Extension API does not expose source paths for custom or appended prompt text, so Config Manager labels those entries generically instead of assuming they came from `SYSTEM.md` or `APPEND_SYSTEM.md`. A merged append channel is therefore counted as one loaded context resource even when Pi combined multiple file, CLI, or SDK inputs.
 
 ### Prompt Templates and Themes
 
@@ -135,7 +137,7 @@ On wide terminals, the overlay displays resources on the left and a Context Moni
 
 - **Tools:** description, parameter schema, prompt snippet, and prompt guidelines
 - **Skills:** the skill's system-prompt catalog entry
-- **Contexts:** custom system prompt, merged appended prompt, preset instructions, and each context file's `project_context` contribution
+- **Contexts:** grouped system-prompt sources, each context file's `project_context` contribution, and a dedicated complete effective-prompt entry
 - **Prompt Templates, Themes, and Extensions:** configured state, source, scope, package origin, and path details
 
 Before the first agent run, the monitor refreshes Pi's current prompt preview whenever the manager opens. After a run starts, it shows the effective system prompt captured at `agent_start`, keeps status metadata visible while prompt content scrolls, and verifies enabled and disabled Skills and Context Files against that captured prompt. A disabled resource that is reintroduced by a later extension is reported as `FOUND IN EFFECTIVE PROMPT`. Policy changes made while the manager is open appear in the captured prompt after the next agent run.

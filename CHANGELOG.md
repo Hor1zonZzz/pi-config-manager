@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Count custom, merged appended, and context-file prompt inputs together in the HUD `contexts n/n` total, and group the Contexts view into System Prompt Sources, Context Files, and Effective Prompt.
 - **Breaking:** Reduced the public slash-command surface to `/config-manager` and `/preset`; resource tabs are now reached only through the unified manager.
 - Keep monitor status metadata visible while scrolling captured prompt content.
 - Refresh pre-run prompt previews whenever the manager opens and publish current skill/context counts after policy changes.

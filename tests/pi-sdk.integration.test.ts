@@ -146,6 +146,21 @@ function createProbe(capture: ProbeCapture) {
 	};
 }
 
+async function loadAutomaticContextPaths(cwd: string): Promise<string[]> {
+	const settingsManager = SettingsManager.create(cwd, env.agentDir);
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir: env.agentDir,
+		settingsManager,
+		noExtensions: true,
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+	});
+	await loader.reload();
+	return loader.getAgentsFiles().agentsFiles.map((file) => file.path);
+}
+
 async function createLoadedResources(capture: ProbeCapture) {
 	writePromptResources();
 	const settingsManager = SettingsManager.create(env.cwd, env.agentDir);
@@ -217,6 +232,21 @@ function expectIntegratedBehavior(
 }
 
 describe("real Pi SDK integration", () => {
+	test("discovers global, ancestor, and overriding context files", async () => {
+		const nested = `${env.cwd}/nested`;
+		mkdirSync(nested, { recursive: true });
+		writeFileSync(`${env.agentDir}/AGENTS.md`, "global\n", "utf8");
+		writeFileSync(`${env.cwd}/CLAUDE.md`, "ancestor\n", "utf8");
+		writeFileSync(`${nested}/AGENTS.md`, "shadowed\n", "utf8");
+		writeFileSync(`${nested}/AGENTS.override.md`, "override\n", "utf8");
+
+		expect(await loadAutomaticContextPaths(nested)).toEqual([
+			`${env.agentDir}/AGENTS.md`,
+			`${env.cwd}/CLAUDE.md`,
+			`${nested}/AGENTS.override.md`,
+		]);
+	});
+
 	test("loads Pi prompt resources and exposes them through /config-manager", async () => {
 		const capture: ProbeCapture = { commands: [] };
 		const { loader, settingsManager } = await createLoadedResources(capture);
