@@ -231,14 +231,20 @@ function skillPromptPreview(skill: SkillRecord, sourceInfo: SourceInfo) {
 	const skillEnd = lines.findIndex(
 		(line, index) => index > skillStart && line.trim() === "</skill>",
 	);
+	const skillLines =
+		skillStart >= 0 && skillEnd > skillStart
+			? lines.slice(skillStart + 1, skillEnd)
+			: [];
+	const skillNameTag = skillLines
+		.find((line) => line.trim().startsWith("<name>"))
+		?.trim();
 	return {
 		content,
 		highlightTarget: {
 			kind: "text-span" as const,
 			text:
-				skillStart >= 0 && skillEnd > skillStart
-					? lines.slice(skillStart + 1, skillEnd).join("\n")
-					: content,
+				skillNameTag ??
+				(skillLines.length > 0 ? skillLines.join("\n") : content),
 		},
 	};
 }

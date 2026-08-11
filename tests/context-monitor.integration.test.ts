@@ -314,7 +314,7 @@ describe("prompt and context behavior", () => {
 		}
 	});
 
-	test("detects a disabled skill reintroduced into the effective prompt", async () => {
+	test("detects a disabled skill reintroduced with changed metadata and formatting", async () => {
 		const skill = {
 			name: "blocked-skill",
 			description: "Blocked skill",
@@ -330,21 +330,30 @@ describe("prompt and context behavior", () => {
 			})}\n`,
 			"utf8",
 		);
-		const promptSkill = {
+		const catalogSkill = {
 			name: skill.name,
 			description: skill.description,
 			filePath: skill.path,
 			baseDir: "/skills/blocked",
 			disableModelInvocation: false,
 		};
-		const finalPrompt = `Base${formatSkillsForPrompt([promptSkill as any])}`;
+		const reintroducedSkill = {
+			...catalogSkill,
+			description: "Changed by a later extension",
+			filePath: "/other-extension/blocked/SKILL.md",
+			baseDir: "/other-extension/blocked",
+		};
+		const reintroducedPrompt = formatSkillsForPrompt([
+			reintroducedSkill as any,
+		]).replaceAll("    ", "\t");
+		const finalPrompt = `Base${reintroducedPrompt}`;
 		const harness = createHarness({
 			skills: [skill],
 			systemPrompt: finalPrompt,
 			promptOptions: {
 				selectedTools: ["read"],
 				toolSnippets: {},
-				skills: [promptSkill],
+				skills: [catalogSkill],
 				contextFiles: [],
 			},
 		});
