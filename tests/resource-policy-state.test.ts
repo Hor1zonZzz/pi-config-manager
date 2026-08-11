@@ -21,8 +21,7 @@ describe("resource policy state", () => {
 			disabledContexts: ["B.md"],
 			preset: {
 				name: "focus",
-				customTools: true,
-				originalState: { thinkingLevel: "medium", tools: ["read"] },
+				originalState: { thinkingLevel: "medium" },
 			},
 		};
 

@@ -15,7 +15,6 @@ for file in \
   package/THIRD_PARTY_NOTICES.md \
   package/src/index.ts \
   package/src/policy-manager.ts \
-  package/src/preset-editor.ts \
   package/src/presets.ts \
   package/skills/preset-settings/SKILL.md; do
   test -f "$TMP_DIR/$file" || {

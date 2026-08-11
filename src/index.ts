@@ -9,7 +9,6 @@ import {
 	buildPromptResourceInventory,
 	buildPublicSnapshot,
 } from "./resource-inventory";
-import { resolvePackageResources } from "./extensions";
 import { registerManagerCommands } from "./manager-commands";
 import { installResourceHud, openConfigManager } from "./manager-ui";
 import { PolicyManager } from "./policy-manager";
@@ -22,7 +21,7 @@ import {
 	type ToggleableResourceTab,
 } from "./resource-policy-state";
 import { PresetController } from "./preset-controller";
-import { RuntimeLifecycleController } from "./runtime-lifecycle";
+import { registerRuntimeLifecycle } from "./runtime-lifecycle";
 import { ToolRuntimeController } from "./tool-runtime-controller";
 import {
 	cloneSessionState,
@@ -34,6 +33,7 @@ import {
 import {
 	DEFAULT_SESSION_STATE,
 	type ManagerSnapshot,
+	type ManagerState,
 	type ResourceSettings,
 	type ResourceTab,
 	type SessionResourceState,
@@ -58,35 +58,22 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	});
 	let settleTimer: ReturnType<typeof setTimeout> | undefined;
 	let requestHudRender: (() => void) | undefined;
-	let snapshot: ManagerSnapshot = {
+	let state: ManagerState = {
 		ready: false,
-		customPromptActive: false,
 		customSystemPrompt: undefined,
 		appendedSystemPrompt: undefined,
-		presetInstructions: undefined,
 		contextsKnown: false,
-		extensionsKnown: false,
-		promptsKnown: false,
-		themesKnown: false,
 		tools: [],
 		toolSnippets: {},
 		activeTools: new Set(),
 		runtimeToolControls: new Map(),
-		projectDisabledTools: new Set(),
 		skills: [],
-		enabledSkills: new Set(),
-		projectDisabledSkills: new Set(),
 		contexts: [],
-		enabledContexts: new Set(),
-		projectDisabledContexts: new Set(),
-		extensions: [],
-		prompts: [],
-		themes: [],
 	};
 	const toolController = new ToolRuntimeController(pi, policy, {
-		getSnapshot: () => snapshot,
-		setSnapshot: (nextSnapshot) => {
-			snapshot = nextSnapshot;
+		getState: () => state,
+		setState: (nextState) => {
+			state = nextState;
 		},
 		requestHudRender: () => requestHudRender?.(),
 		emitStateChanged,
@@ -96,43 +83,33 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		setSessionState: (state) => {
 			sessionState = state;
 		},
-		getSnapshot: () => snapshot,
-		setSnapshot: (nextSnapshot) => {
-			snapshot = nextSnapshot;
-		},
 		reconcileTools: () => toolController.reconcile(),
 		persistSession,
-		requestHudRender: () => requestHudRender?.(),
 	});
-	const lifecycleController = new RuntimeLifecycleController(
-		pi,
-		policy,
-		presetController,
-		toolController,
-		{
-			getSnapshot: () => snapshot,
-			setSnapshot: (nextSnapshot) => {
-				snapshot = nextSnapshot;
-			},
-			getSessionState: () => sessionState,
-			setSettings: (nextGlobalSettings, nextProjectSettings) => {
-				globalSettings = nextGlobalSettings;
-				projectSettings = nextProjectSettings;
-			},
-			restoreSession,
-			updatePromptInventory,
-			refreshSkillsFromCommands,
-			installHud,
-			scheduleSettledRefresh,
-			requestHudRender: () => requestHudRender?.(),
-			shutdown: (ctx) => {
-				if (settleTimer) clearTimeout(settleTimer);
-				settleTimer = undefined;
-				ctx.ui.setWidget("pi-config-manager", undefined);
-				requestHudRender = undefined;
-			},
+	registerRuntimeLifecycle(pi, policy, presetController, toolController, {
+		getState: () => state,
+		setState: (nextState) => {
+			state = nextState;
 		},
-	);
+		getSnapshot: getManagerSnapshot,
+		getSessionState: () => sessionState,
+		setSettings: (nextGlobalSettings, nextProjectSettings) => {
+			globalSettings = nextGlobalSettings;
+			projectSettings = nextProjectSettings;
+		},
+		restoreSession,
+		updatePromptInventory,
+		refreshSkillsFromCommands,
+		installHud,
+		scheduleSettledRefresh,
+		requestHudRender: () => requestHudRender?.(),
+		shutdown: (ctx) => {
+			if (settleTimer) clearTimeout(settleTimer);
+			settleTimer = undefined;
+			ctx.ui.setWidget("pi-config-manager", undefined);
+			requestHudRender = undefined;
+		},
+	});
 
 	function persistSession(): void {
 		pi.appendEntry(SESSION_ENTRY, cloneSessionState(sessionState));
@@ -153,10 +130,10 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	}
 
 	function refreshPromptPreview(ctx: ExtensionContext): void {
-		if (snapshot.effectiveSystemPrompt?.source === "agent-start") return;
+		if (state.effectiveSystemPrompt?.source === "agent-start") return;
 		const currentPrompt = ctx.getSystemPrompt();
-		snapshot = {
-			...snapshot,
+		state = {
+			...state,
 			effectiveSystemPrompt: currentPrompt
 				? {
 						content: currentPrompt,
@@ -168,82 +145,56 @@ export default function piConfigManager(pi: ExtensionAPI) {
 
 	function getManagerSnapshot(): ManagerSnapshot {
 		return {
-			...snapshot,
+			...state,
+			customPromptActive: Boolean(state.customSystemPrompt),
+			presetInstructions: presetController.active?.instructions,
 			projectDisabledTools: new Set(projectSettings.disabledTools),
+			enabledSkills: policy.resolveEnabledSkills(state.skills),
 			projectDisabledSkills: new Set(projectSettings.disabledSkills),
+			enabledContexts: policy.resolveEnabledContexts(state.contexts),
 			projectDisabledContexts: new Set(projectSettings.disabledContexts),
+			presetName: presetController.activeName,
 		};
 	}
 
 	function updatePromptInventory(options: BuildSystemPromptOptions): void {
-		const inventory = buildPromptResourceInventory(options);
-		snapshot = {
-			...snapshot,
-			...inventory,
+		state = {
+			...state,
+			...buildPromptResourceInventory(options),
 			ready: true,
-			enabledSkills: policy.resolveEnabledSkills(inventory.skills),
 			contextsKnown: true,
-			enabledContexts: policy.resolveEnabledContexts(inventory.contexts),
 		};
 		requestHudRender?.();
 	}
 
-	async function refreshPackageResources(ctx: ExtensionContext): Promise<void> {
-		try {
-			const resources = await resolvePackageResources(
-				ctx.cwd,
-				ctx.isProjectTrusted(),
-			);
-			snapshot = {
-				...snapshot,
-				extensionsKnown: true,
-				promptsKnown: true,
-				themesKnown: true,
-				extensions: resources.extensions,
-				prompts: resources.prompts,
-				themes: resources.themes,
-			};
-			requestHudRender?.();
-			emitStateChanged();
-		} catch (error) {
-			ctx.ui.notify(
-				`Could not resolve package resources: ${error instanceof Error ? error.message : String(error)}`,
-				"warning",
-			);
-		}
-	}
-
 	function refreshSkillsFromCommands(): void {
-		const skills = buildLoadedSkillInventory(pi.getCommands(), snapshot.skills);
-		snapshot = {
-			...snapshot,
+		state = {
+			...state,
 			ready: true,
-			skills,
-			enabledSkills: policy.resolveEnabledSkills(skills),
+			skills: buildLoadedSkillInventory(pi.getCommands(), state.skills),
 		};
 		requestHudRender?.();
 		emitStateChanged();
 	}
 
-	function scheduleSettledRefresh(ctx: ExtensionContext): void {
+	function scheduleSettledRefresh(): void {
 		if (settleTimer) clearTimeout(settleTimer);
 		settleTimer = setTimeout(() => {
 			settleTimer = undefined;
 			toolController.updateInventory();
 			refreshSkillsFromCommands();
-			void refreshPackageResources(ctx);
 		}, 500);
 	}
 
 	function publicSnapshot() {
-		return buildPublicSnapshot(snapshot, policy.resolveBaseTools());
+		return buildPublicSnapshot(getManagerSnapshot(), policy.resolveBaseTools());
 	}
 
 	function toggleSessionResource(
 		tab: ToggleableResourceTab,
 		id: string,
-		ctx: ExtensionContext,
 	): void {
+		const snapshot = getManagerSnapshot();
 		if (tab === "tools") {
 			const wasEffective = snapshot.activeTools.has(id);
 			policy.removeExternalTool(id);
@@ -251,11 +202,9 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			if (wasEffective) base.delete(id);
 			else base.add(id);
 			sessionState.tools = uniqueSorted(base);
-			if (sessionState.preset) sessionState.preset.customTools = true;
 			policy.setSessionState(sessionState);
 			toolController.reconcile();
 			persistSession();
-			presetController.updateStatus(ctx);
 			return;
 		}
 		const resourceTab = tab === "skills" ? "skills" : "contexts";
@@ -267,24 +216,13 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			enabled,
 		);
 		policy.setSessionState(sessionState);
-		if (resourceTab === "skills") {
-			snapshot = {
-				...snapshot,
-				enabledSkills: policy.resolveEnabledSkills(snapshot.skills),
-			};
-		} else {
-			snapshot = {
-				...snapshot,
-				enabledContexts: policy.resolveEnabledContexts(snapshot.contexts),
-			};
-		}
 		persistSession();
 		requestHudRender?.();
 		emitStateChanged();
 	}
 
 	function setGlobalResource(
-		kind: "tools" | "skills" | "contexts",
+		kind: ToggleableResourceTab,
 		name: string,
 		enabled: boolean,
 		ctx: ExtensionContext,
@@ -298,11 +236,6 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		);
 		policy.setSettings(globalSettings, projectSettings);
 		saveGlobalSettings(globalSettings);
-		snapshot = {
-			...snapshot,
-			enabledSkills: policy.resolveEnabledSkills(snapshot.skills),
-			enabledContexts: policy.resolveEnabledContexts(snapshot.contexts),
-		};
 		toolController.updateInventory();
 		ctx.ui.notify(
 			`Global ${kind} setting updated: ${name} ${enabled ? "enabled" : "disabled"}`,
@@ -316,6 +249,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		id: string,
 		ctx: ExtensionCommandContext,
 	): void {
+		const snapshot = getManagerSnapshot();
 		const runtimeControl =
 			tab === "tools" ? snapshot.runtimeToolControls.get(id) : undefined;
 		const projectLocked =
@@ -332,7 +266,7 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				"warning",
 			);
 		} else if (presetController.activeName) {
-			toggleSessionResource(tab, id, ctx);
+			toggleSessionResource(tab, id);
 		} else {
 			setGlobalResource(tab, id, !isResourceEnabled(snapshot, tab, id), ctx);
 		}
@@ -347,11 +281,10 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	): Promise<void> {
 		await openConfigManager(initialTab, ctx, {
 			getSnapshot: getManagerSnapshot,
-			prepare: async () => {
+			prepare: () => {
 				updatePromptInventory(ctx.getSystemPromptOptions());
 				toolController.updateInventory();
 				refreshPromptPreview(ctx);
-				await refreshPackageResources(ctx);
 			},
 			togglePolicyResource: applyToggleableResourceChange,
 		});
@@ -374,6 +307,4 @@ export default function piConfigManager(pi: ExtensionAPI) {
 	pi.events.on("config-manager:request-snapshot", () => {
 		emitStateChanged();
 	});
-
-	lifecycleController.register();
 }

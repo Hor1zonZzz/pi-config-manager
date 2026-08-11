@@ -14,36 +14,16 @@ import {
 	promptContainsTarget,
 } from "./prompt-highlighting";
 import { buildResourceViewItems } from "./resource-view-items";
-import type {
-	ManagerSnapshot,
-	PackageResourceChange,
-	ResourceTab,
-} from "./types";
+import type { ManagerSnapshot, ResourceTab } from "./types";
 
 const MONITOR_SCROLL_STEP = 3;
-const TABS: ResourceTab[] = [
-	"overview",
-	"tools",
-	"skills",
-	"contexts",
-	"prompts",
-	"themes",
-	"extensions",
-];
+const TABS: ResourceTab[] = ["overview", "tools", "skills", "contexts"];
 const LABELS: Record<ResourceTab, string> = {
 	overview: "Overview",
 	tools: "Tools",
 	skills: "Skills",
 	contexts: "Contexts",
-	prompts: "Prompt Templates",
-	themes: "Themes",
-	extensions: "Extensions",
 };
-const PACKAGE_RESOURCE_TABS = new Set<ResourceTab>([
-	"prompts",
-	"themes",
-	"extensions",
-]);
 
 interface MonitorViewportOptions {
 	item: ViewItem;
@@ -100,11 +80,10 @@ export class ConfigManagerView implements Component, Focusable {
 	constructor(
 		initialTab: ResourceTab,
 		private readonly getSnapshot: () => ManagerSnapshot,
-		private readonly stagedPackageResources: Map<string, PackageResourceChange>,
 		private readonly theme: Theme,
 		private readonly keybindings: KeybindingsManager,
 		private readonly onToggle: (tab: ResourceTab, id: string) => void,
-		private readonly onDone: (action: "close" | "save") => void,
+		private readonly onDone: () => void,
 	) {
 		this.tab = initialTab;
 	}
@@ -123,7 +102,7 @@ export class ConfigManagerView implements Component, Focusable {
 
 	handleInput(data: string): void {
 		if (this.keybindings.matches(data, "tui.select.cancel")) {
-			this.onDone("close");
+			this.onDone();
 			return;
 		}
 		if (this.keybindings.matches(data, "tui.input.tab")) {
@@ -192,9 +171,7 @@ export class ConfigManagerView implements Component, Focusable {
 			if (item?.enabled !== undefined) this.onToggle(this.tab, item.id);
 			return true;
 		}
-		if (data !== "S" || this.stagedPackageResources.size === 0) return false;
-		this.onDone("save");
-		return true;
+		return false;
 	}
 
 	private updateSearch(data: string): void {
@@ -272,9 +249,6 @@ export class ConfigManagerView implements Component, Focusable {
 	}
 
 	private renderTargetLabel(snapshot: ManagerSnapshot): string {
-		if (PACKAGE_RESOURCE_TABS.has(this.tab)) {
-			return this.theme.fg("success", "View/Edit: Pi settings");
-		}
 		const view = this.theme.fg("accent", "View: Effective");
 		if (snapshot.presetName) {
 			return `${view} · ${this.theme.fg("warning", `Edit: Session · ${snapshot.presetName}`)}`;
@@ -283,9 +257,6 @@ export class ConfigManagerView implements Component, Focusable {
 	}
 
 	private renderConstraintLabel(snapshot: ManagerSnapshot): string {
-		if (PACKAGE_RESOURCE_TABS.has(this.tab)) {
-			return this.theme.fg("dim", "Constraints: n/a");
-		}
 		const constraintIds = Array.from(
 			new Set(
 				Array.from(snapshot.runtimeToolControls.values()).map(
@@ -368,12 +339,10 @@ export class ConfigManagerView implements Component, Focusable {
 	}
 
 	private renderFooter(width: number): string {
-		const canSave = PACKAGE_RESOURCE_TABS.has(this.tab);
-		const saveHint = canSave ? " · S save + reload" : "";
 		return truncateToWidth(
 			this.theme.fg(
 				"dim",
-				`Type search · Tab tabs · ←/→ panes · ↑/↓ move or scroll · Space toggle${saveHint} · Esc close`,
+				"Type search · Tab tabs · ←/→ panes · ↑/↓ move or scroll · Space toggle · Esc close",
 			),
 			width,
 		);
@@ -415,10 +384,7 @@ export class ConfigManagerView implements Component, Focusable {
 			if (item.enabled === true) check = this.theme.fg("success", "● ");
 			if (item.enabled === false) check = this.theme.fg("dim", "○ ");
 			const lock = item.locked ? this.theme.fg("warning", "🔒 ") : "";
-			const pending = this.stagedPackageResources.has(item.id)
-				? this.theme.fg("warning", " staged")
-				: "";
-			return `${cursor}${check}${lock}${item.label}${this.theme.fg("dim", `  ${item.state}`)}${pending}`;
+			return `${cursor}${check}${lock}${item.label}${this.theme.fg("dim", `  ${item.state}`)}`;
 		});
 	}
 
@@ -552,11 +518,7 @@ export class ConfigManagerView implements Component, Focusable {
 	}
 
 	private allItems(): ViewItem[] {
-		return buildResourceViewItems(
-			this.tab,
-			this.getSnapshot(),
-			this.stagedPackageResources,
-		);
+		return buildResourceViewItems(this.tab, this.getSnapshot());
 	}
 
 	private filteredItems(): ViewItem[] {

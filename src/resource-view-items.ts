@@ -1,7 +1,6 @@
 import { basename, dirname } from "node:path";
 import {
 	formatSkillsForPrompt,
-	type ResolvedResource,
 	type Skill,
 	type SourceInfo,
 } from "@earendil-works/pi-coding-agent";
@@ -16,33 +15,11 @@ import {
 import type {
 	ContextRecord,
 	ManagerSnapshot,
-	PackageResourceChange,
-	PackageResourceKind,
 	ResourceTab,
 	RuntimeToolControl,
 	SkillRecord,
 	ToolRecord,
 } from "./types";
-
-export function packageKindForTab(
-	tab: ResourceTab,
-): PackageResourceKind | undefined {
-	if (tab === "prompts" || tab === "themes" || tab === "extensions") {
-		return tab;
-	}
-	return undefined;
-}
-
-export function packageResourceId(
-	kind: PackageResourceKind,
-	resource: ResolvedResource,
-): string {
-	return `${kind}:${resource.path}`;
-}
-
-function resourceSourceDetail(resource: ResolvedResource): string {
-	return `${resource.metadata.scope}/${resource.metadata.origin} · ${resource.metadata.source}\n${resource.path}`;
-}
 
 function sourceDetail(sourceInfo: ToolRecord["sourceInfo"]): string {
 	if (!sourceInfo) return "unknown source";
@@ -55,10 +32,6 @@ function stringifyJson(value: unknown): string {
 	} catch {
 		return "[schema could not be serialized]";
 	}
-}
-
-function enabledCount(resources: ResolvedResource[]): string {
-	return `${resources.filter((resource) => resource.enabled).length}/${resources.length}`;
 }
 
 function buildOverviewItems(snapshot: ManagerSnapshot): ViewItem[] {
@@ -84,26 +57,6 @@ function buildOverviewItems(snapshot: ManagerSnapshot): ViewItem[] {
 				: "loading",
 			detail:
 				"Includes SYSTEM, merged APPEND_SYSTEM, and Pi-loaded context files; preset instructions remain a separate synthetic source.",
-		},
-		{
-			id: "prompts",
-			label: "Prompt Templates",
-			state: snapshot.promptsKnown ? enabledCount(snapshot.prompts) : "loading",
-			detail: "Pi-resolved prompt templates. Changes require reload.",
-		},
-		{
-			id: "themes",
-			label: "Themes",
-			state: snapshot.themesKnown ? enabledCount(snapshot.themes) : "loading",
-			detail: "Pi-resolved themes. Changes require reload.",
-		},
-		{
-			id: "extensions",
-			label: "Extensions",
-			state: snapshot.extensionsKnown
-				? enabledCount(snapshot.extensions)
-				: "loading",
-			detail: "Pi-resolved extension resources. Changes require reload.",
 		},
 	];
 }
@@ -391,36 +344,13 @@ function buildContextItems(snapshot: ManagerSnapshot): ViewItem[] {
 	];
 }
 
-function buildPackageItems(
-	kind: PackageResourceKind,
-	snapshot: ManagerSnapshot,
-	stagedPackageResources: Map<string, PackageResourceChange>,
-): ViewItem[] {
-	return snapshot[kind].map((resource) => {
-		const id = packageResourceId(kind, resource);
-		const staged = stagedPackageResources.get(id);
-		const enabled = staged?.enabled ?? resource.enabled;
-		return {
-			id,
-			label: basename(resource.path),
-			enabled,
-			state: `${enabled ? "enabled" : "disabled"} · reload required`,
-			detail: resourceSourceDetail(resource),
-		};
-	});
-}
-
 export function buildResourceViewItems(
 	tab: ResourceTab,
 	snapshot: ManagerSnapshot,
-	stagedPackageResources: Map<string, PackageResourceChange>,
 ): ViewItem[] {
 	if (tab === "overview") return buildOverviewItems(snapshot);
 	if (tab === "tools") return buildToolItems(snapshot);
 	if (tab === "skills") return buildSkillItems(snapshot);
 	if (tab === "contexts") return buildContextItems(snapshot);
-	const packageKind = packageKindForTab(tab);
-	return packageKind
-		? buildPackageItems(packageKind, snapshot, stagedPackageResources)
-		: [];
+	return [];
 }

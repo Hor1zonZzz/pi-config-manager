@@ -10,7 +10,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Added read-only custom system prompt, merged appended prompt, and active preset instruction entries directly to the Contexts view.
 - Added effective-prompt presence verification for enabled and disabled skills and context files, including explicit warnings when disabled resources are reintroduced.
-- Added native Pi Prompt Template and Theme inventory, staged toggles, and reload flow.
 
 ### Changed
 
@@ -19,10 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Keep monitor status metadata visible while scrolling captured prompt content.
 - Refresh pre-run prompt previews whenever the manager opens and publish current skill/context counts after policy changes.
 - Filter every duplicate standard skill/context prompt section and report filtering failures on every affected run.
-- Generalize Pi package-resource resolution and settings writes across extensions, prompt templates, and themes while retaining source metadata.
-- Split the manager UI, prompt monitoring, resource view models, prompt policy, and behavior tests into focused modules without changing the public API.
-- Decompose resource item rendering, TUI input/layout, toggle planning, package-setting writes, inventory collection, and policy-state updates into focused helpers.
+- Split the manager UI, prompt monitoring, resource view models, prompt policy, and behavior tests into focused modules.
+- Decompose resource item rendering, TUI input/layout, inventory collection, and policy-state updates into focused helpers.
 - Move preset/session policy, tool runtime reconciliation, command registration, and Pi lifecycle handling into dedicated controllers while preserving event order.
+
+### Removed
+
+- **Breaking:** Removed Prompt Template, Theme, and Extension Pi-settings tabs and their counts from `config-manager:state-changed`; use Pi's native `pi config` command to enable or disable those package resources.
+- Removed the editor-border preset label; the active preset remains visible in the resource HUD and manager header.
 
 ## [0.2.0] - 2026-08-02
 

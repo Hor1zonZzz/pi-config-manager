@@ -19,8 +19,7 @@ export function registerManagerCommands(
 	handlers: ManagerCommandHandlers,
 ): void {
 	pi.registerCommand("config-manager", {
-		description:
-			"Manage Pi tools, skills, contexts, prompts, themes, and extensions",
+		description: "Manage Pi tools, skills, and contexts",
 		handler: async (_args, ctx) => handlers.showManager("overview", ctx),
 	});
 	pi.registerCommand("preset", {

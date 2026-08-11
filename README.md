@@ -1,6 +1,6 @@
 # Pi Config Manager
 
-Manage Pi tools, skills, context files, prompt sources, prompt templates, themes, and extensions from one searchable TUI overlay.
+Manage Pi tools, skills, context files, prompt sources, and session presets from one searchable TUI overlay.
 
 English | [简体中文](README.zh-CN.md)
 
@@ -8,23 +8,22 @@ Pi Config Manager is a resource-policy extension for [Pi Coding Agent](https://g
 
 ## Highlights
 
-- One UI for **Tools**, **Skills**, **Contexts**, **Prompt Templates**, **Themes**, and **Extensions**
+- One UI for **Tools**, **Skills**, and **Contexts**
 - Effective-state resource display showing what is currently available to the model
 - Searchable, keyboard-driven overlay that keeps the current conversation visible
 - Persistent **Global** resource settings, with presets isolated to the current session
 - Context Monitor showing how the selected resource contributes to the model-visible prompt
 - A compact resource HUD above the editor
-- Source-aware Pi package resource toggles saved through public settings APIs
 - Built-in named presets for model, thinking level, tools, skills, and instructions
 - Optional runtime-layer event API for read-only modes and other policy extensions
 - No telemetry and no network requests
 
 ## Requirements
 
-- Pi Coding Agent **0.83.x**
+- Pi Coding Agent **0.84.x**
 - Interactive TUI mode for the visual manager
 
-The current release is tested against Pi 0.83.0. Later Pi releases may work, but Pi's extension and TUI APIs can change; check this project's release notes before upgrading.
+The current development baseline is tested against Pi 0.84.0. Later Pi releases may work, but Pi's extension and TUI APIs can change; check this project's release notes before upgrading.
 
 ## Install
 
@@ -58,7 +57,6 @@ Start Pi, then run:
 2. Press `Tab` to move between resource tabs.
 3. Type to filter the current list.
 4. Press `Space` or `Enter` to toggle the selected resource in the automatically selected target.
-5. After staging a Prompt Template, Theme, or Extension change, press `S` to save and reload.
 
 ### Keyboard controls
 
@@ -69,7 +67,6 @@ Start Pi, then run:
 | `↑` / `↓` | Move through resources, or scroll the focused monitor |
 | `←` / `→` | Focus the resource list or Context Monitor |
 | `Space` / `Enter` | Toggle the selected resource in the active target |
-| `S` | Save staged Pi package resource changes and reload |
 | `Esc` | Close the manager |
 
 Keybinding-aware actions follow Pi's configured TUI keybindings.
@@ -81,6 +78,8 @@ Keybinding-aware actions follow Pi's configured TUI keybindings.
 | `/config-manager` | Open the unified resource manager |
 | `/preset` | Select or clear a named preset |
 | `/preset <name>` | Activate a named preset directly |
+
+Use Pi's native `pi config` command for Prompt Template, Theme, and Extension loading settings; Config Manager intentionally does not duplicate that settings UI.
 
 ## Effective view and automatic edit target
 
@@ -99,8 +98,6 @@ Activating or clearing a preset changes the current session's model, thinking le
 
 Trusted projects may add repository-specific defaults in `.pi/resource-settings.json`. The visual Global edit target changes only Global settings; project files stay source-controlled and are edited separately.
 
-Prompt Template, Theme, and Extension changes are independent of the Effective resource-policy view. These tabs display **View/Edit: Pi settings**. Changes are staged in the UI and then written to the appropriate global or project Pi settings when you press `S` and confirm reload.
-
 ## Resource behavior
 
 ### Tools
@@ -111,7 +108,6 @@ Unconstrained tool changes apply immediately through `pi.setActiveTools()`. Conf
 
 Loaded skills use Config Manager's immediate Global/Session/Preset policy. Disabled skills are removed from Pi's standard system-prompt skill catalog, and invoking a disabled `/skill:<name>` command is blocked with a notification.
 
-
 ### Contexts and Prompt Sources
 
 The Contexts tab groups Pi's custom system prompt, merged appended system prompt, and active preset instructions under **System Prompt Sources**, individually toggleable `AGENTS.md`/`CLAUDE.md` inputs under **Context Files**, and the latest complete prompt under **Effective Prompt**. Disabled context files are removed from Pi's standard `project_context` prompt block. This controls model-visible prompt content; it does **not** prevent tools from reading a known file path.
@@ -120,16 +116,6 @@ The resource HUD counts custom system prompt text, merged appended system prompt
 
 Pi's public Extension API does not expose source paths for custom or appended prompt text, so Config Manager labels those entries generically instead of assuming they came from `SYSTEM.md` or `APPEND_SYSTEM.md`. A merged append channel is therefore counted as one loaded context resource even when Pi combined multiple file, CLI, or SDK inputs.
 
-### Prompt Templates and Themes
-
-Prompt Template and Theme toggles are staged until saved. Config Manager writes Pi's native top-level or package filters through the public `SettingsManager`, then asks Pi to reload.
-
-### Extensions
-
-Extension toggles use the same staged Pi-settings flow.
-
-Pi cannot apply a per-extension filter when a local package source directly names a single extension file. Config Manager reports this case instead of saving an ineffective toggle. It also prevents disabling itself from its active UI.
-
 ## Context Monitor
 
 On wide terminals, the overlay displays resources on the left and a Context Monitor on the right. Selecting a resource shows:
@@ -137,7 +123,6 @@ On wide terminals, the overlay displays resources on the left and a Context Moni
 - **Tools:** description, parameter schema, prompt snippet, and prompt guidelines
 - **Skills:** the skill's system-prompt catalog entry
 - **Contexts:** grouped system-prompt sources, each context file's `project_context` contribution, and a dedicated complete effective-prompt entry
-- **Prompt Templates, Themes, and Extensions:** configured state, source, scope, package origin, and path details
 
 Before the first agent run, the monitor refreshes Pi's current prompt preview whenever the manager opens. After a run starts, it shows the effective system prompt captured at `agent_start`, keeps status metadata visible while prompt content scrolls, and verifies enabled and disabled Skills and Context Files against that captured prompt. A disabled resource that is reintroduced by a later extension is reported as `FOUND IN EFFECTIVE PROMPT`. Policy changes made while the manager is open appear in the captured prompt after the next agent run.
 
@@ -247,12 +232,10 @@ The former `preset:tools-changed`, `preset:skills-changed`, and `config-manager:
 - Config Manager is a prompt/resource policy tool, not a filesystem or process sandbox.
 - Skill and context filtering expects Pi's standard prompt sections. If a custom system prompt removes or rewrites those sections, Config Manager leaves the prompt unchanged and warns on every affected run. The effective-prompt verifier reports disabled resources that remain visible after `agent_start`; this is detection, not a security sandbox.
 - The visual manager requires TUI mode. In RPC, JSON, and print modes, the overlay is unavailable.
-- Static package inventory reflects Pi settings resolution. Pi 0.83 does not expose the current session's temporary `--extension` or SDK inline-extension inventory through `ExtensionAPI`.
-- Prompt Template, Theme, and Extension changes require a Pi reload.
 
 ## Development
 
-Requirements: Node.js 22.19+, [Bun](https://bun.sh/), and Pi 0.83.0+.
+Requirements: Node.js 22.19+, [Bun](https://bun.sh/), and Pi 0.84.0+.
 
 ```bash
 git clone https://github.com/Hor1zonZzz/pi-config-manager.git

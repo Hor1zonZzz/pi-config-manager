@@ -12,119 +12,18 @@ import {
 } from "@earendil-works/pi-tui";
 import { ConfigManagerView } from "./config-manager-view";
 import { countLoadedContextResources } from "./context-monitor";
-import { packageKindForTab, packageResourceId } from "./resource-view-items";
-import { isDirectFilePackage, savePackageResourceChanges } from "./extensions";
 import { describePreset, type PresetsConfig } from "./presets";
-import type {
-	ManagerSnapshot,
-	PackageResourceChange,
-	ResourceTab,
-} from "./types";
-
-type PolicyResourceTab = "tools" | "skills" | "contexts";
+import type { ToggleableResourceTab } from "./resource-policy-state";
+import type { ManagerSnapshot, ResourceTab } from "./types";
 
 interface ManagerDialogOptions {
 	getSnapshot: () => ManagerSnapshot;
-	prepare: (ctx: ExtensionCommandContext) => Promise<void>;
+	prepare: () => void;
 	togglePolicyResource: (
-		tab: PolicyResourceTab,
+		tab: ToggleableResourceTab,
 		id: string,
 		ctx: ExtensionCommandContext,
 	) => void;
-}
-
-type ResourceTogglePlan =
-	| { action: "ignore" }
-	| { action: "reject"; message: string }
-	| { action: "policy"; tab: PolicyResourceTab; id: string }
-	| { action: "stage"; id: string; change: PackageResourceChange };
-
-interface PlanResourceToggleOptions {
-	tab: ResourceTab;
-	id: string;
-	snapshot: ManagerSnapshot;
-	staged: Map<string, PackageResourceChange>;
-	cwd: string;
-}
-
-function planResourceToggle(
-	options: PlanResourceToggleOptions,
-): ResourceTogglePlan {
-	const { tab, id, snapshot, staged, cwd } = options;
-	const packageKind = packageKindForTab(tab);
-	if (packageKind) {
-		const resource = snapshot[packageKind].find(
-			(item) => packageResourceId(packageKind, item) === id,
-		);
-		if (!resource) return { action: "ignore" };
-		if (
-			packageKind === "extensions" &&
-			resource.path.includes("pi-config-manager")
-		) {
-			return {
-				action: "reject",
-				message:
-					"Pi Config Manager cannot disable itself from the active manager.",
-			};
-		}
-		if (packageKind === "extensions" && isDirectFilePackage(resource, cwd)) {
-			return {
-				action: "reject",
-				message:
-					"Pi does not support per-extension filters for a package source that directly names one extension file.",
-			};
-		}
-		const current = staged.get(id)?.enabled ?? resource.enabled;
-		return {
-			action: "stage",
-			id,
-			change: { kind: packageKind, resource, enabled: !current },
-		};
-	}
-	if (tab === "tools" || tab === "skills" || tab === "contexts") {
-		return { action: "policy", tab, id };
-	}
-	return { action: "ignore" };
-}
-
-function applyResourceTogglePlan(
-	plan: ResourceTogglePlan,
-	staged: Map<string, PackageResourceChange>,
-	ctx: ExtensionCommandContext,
-	options: ManagerDialogOptions,
-): boolean {
-	if (plan.action === "ignore") return false;
-	if (plan.action === "reject") {
-		ctx.ui.notify(plan.message, "warning");
-		return false;
-	}
-	if (plan.action === "stage") staged.set(plan.id, plan.change);
-	else options.togglePolicyResource(plan.tab, plan.id, ctx);
-	return true;
-}
-
-async function saveStagedPackageResources(
-	ctx: ExtensionCommandContext,
-	staged: Map<string, PackageResourceChange>,
-): Promise<void> {
-	const confirmed = await ctx.ui.confirm(
-		"Save package resource changes?",
-		"Package resource changes require Pi to reload. Save and reload now?",
-	);
-	if (!confirmed) return;
-	try {
-		await savePackageResourceChanges(
-			ctx.cwd,
-			ctx.isProjectTrusted(),
-			Array.from(staged.values()),
-		);
-		await ctx.reload();
-	} catch (error) {
-		ctx.ui.notify(
-			`Could not save package resource settings: ${error instanceof Error ? error.message : String(error)}`,
-			"error",
-		);
-	}
 }
 
 export async function selectPreset(
@@ -195,29 +94,18 @@ export async function openConfigManager(
 		ctx.ui.notify("Pi Config Manager requires TUI mode", "error");
 		return;
 	}
-	await options.prepare(ctx);
-	const stagedPackageResources = new Map<string, PackageResourceChange>();
-	const action = await ctx.ui.custom<"close" | "save">(
+	options.prepare();
+	await ctx.ui.custom<void>(
 		(tui, theme, keybindings, done) =>
 			new ConfigManagerView(
 				initialTab,
 				options.getSnapshot,
-				stagedPackageResources,
 				theme,
 				keybindings,
 				(tab, id) => {
-					const plan = planResourceToggle({
-						tab,
-						id,
-						snapshot: options.getSnapshot(),
-						staged: stagedPackageResources,
-						cwd: ctx.cwd,
-					});
-					if (
-						applyResourceTogglePlan(plan, stagedPackageResources, ctx, options)
-					) {
-						tui.requestRender();
-					}
+					if (tab === "overview") return;
+					options.togglePolicyResource(tab, id, ctx);
+					tui.requestRender();
 				},
 				done,
 			),
@@ -232,8 +120,6 @@ export async function openConfigManager(
 			},
 		},
 	);
-	if (action !== "save" || stagedPackageResources.size === 0) return;
-	await saveStagedPackageResources(ctx, stagedPackageResources);
 }
 
 export function installResourceHud(
@@ -262,21 +148,10 @@ export function installResourceHud(
 				const contextCount = snapshot.contextsKnown
 					? `${contextResources.enabled}/${contextResources.total}`
 					: "…";
-				const extensionCount = snapshot.extensionsKnown
-					? `${snapshot.extensions.filter((item) => item.enabled).length}/${snapshot.extensions.length}`
-					: "…";
-				const promptCount = snapshot.promptsKnown
-					? `${snapshot.prompts.filter((item) => item.enabled).length}/${snapshot.prompts.length}`
-					: "…";
-				const themeCount = snapshot.themesKnown
-					? `${snapshot.themes.filter((item) => item.enabled).length}/${snapshot.themes.length}`
-					: "…";
-				const second = `  tools ${snapshot.activeTools.size}/${snapshot.tools.length} · skills ${snapshot.enabledSkills.size}/${snapshot.skills.length} · contexts ${contextCount}`;
-				const third = `  extensions ${extensionCount} · prompts ${promptCount} · themes ${themeCount}${snapshot.presetName ? ` · preset ${snapshot.presetName}` : ""}`;
+				const second = `  tools ${snapshot.activeTools.size}/${snapshot.tools.length} · skills ${snapshot.enabledSkills.size}/${snapshot.skills.length} · contexts ${contextCount}${snapshot.presetName ? ` · preset ${snapshot.presetName}` : ""}`;
 				return [
 					first,
 					truncateToWidth(theme.fg("muted", second), width),
-					truncateToWidth(theme.fg("dim", third), width),
 				];
 			},
 			invalidate() {},

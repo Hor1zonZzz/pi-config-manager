@@ -5,7 +5,6 @@ import type {
 } from "./types";
 
 export type ToggleableResourceTab = "tools" | "skills" | "contexts";
-export type PersistentResourceKind = ToggleableResourceTab;
 
 export function uniqueSorted(values: Iterable<string>): string[] {
 	return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
@@ -65,7 +64,7 @@ export function toggleSessionResourceOverride(
 
 export function updateGlobalResourceSettings(
 	settings: ResourceSettings,
-	kind: PersistentResourceKind,
+	kind: ToggleableResourceTab,
 	name: string,
 	enabled: boolean,
 ): ResourceSettings {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { formatSkillsForPrompt } from "@earendil-works/pi-coding-agent";
 import { loadPresets } from "../src/presets";
@@ -16,7 +16,6 @@ beforeEach(() => env.setup());
 afterEach(() => env.teardown());
 const {
 	createHarness,
-	readAgentSettings,
 	writePresets,
 	writeProjectResourceSettings,
 } = env;
@@ -33,13 +32,11 @@ function presetBranchEntry(name: string, tools: string[]) {
 			disabledContexts: [],
 			preset: {
 				name,
-				customTools: false,
 				appliedTools: tools,
 				originalState: {
 					provider: "fixture",
 					model: "base",
 					thinkingLevel: "medium",
-					tools: ["read", "bash"],
 				},
 			},
 		},
@@ -85,52 +82,6 @@ describe("manager behavior contract", () => {
 				baseTools: ["read"],
 				tools: { active: 1, total: 2 },
 			});
-		} finally {
-			await harness.shutdown();
-		}
-	});
-
-	test("stages prompt and theme settings and reloads after saving", async () => {
-		mkdirSync(join(env.agentDir, "prompts"), { recursive: true });
-		mkdirSync(join(env.agentDir, "themes"), { recursive: true });
-		writeFileSync(join(env.agentDir, "prompts", "review.md"), "# Review\n");
-		writeFileSync(join(env.agentDir, "themes", "fixture.json"), "{}\n");
-		const harness = createHarness({ confirm: true });
-		await harness.start();
-		try {
-			const rendered: string[] = [];
-			let targetTab: "prompts" | "themes" = "prompts";
-			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
-				const component = await factory(
-					{ requestRender() {} },
-					createTheme(),
-					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
-				);
-				navigateToManagerTab(component, targetTab);
-				rendered.push(component.render(180).join("\n"));
-				component.handleInput(" ");
-				rendered.push(component.render(180).join("\n"));
-				component.handleInput("S");
-				return result;
-			});
-
-			await harness.commands.get("config-manager").handler("", harness.ctx);
-			expect(readAgentSettings().prompts).toEqual(["-prompts/review.md"]);
-			expect(harness.getReloads()).toBe(1);
-			targetTab = "themes";
-			await harness.commands.get("config-manager").handler("", harness.ctx);
-			expect(readAgentSettings().themes).toEqual(["-themes/fixture.json"]);
-			expect(harness.getReloads()).toBe(2);
-			const output = rendered.join("\n");
-			expect(output).toContain("[Prompt Templates]");
-			expect(output).toContain("[Themes]");
-			expect(output).toContain("View/Edit: Pi settings");
-			expect(output).toContain("staged");
-			expect(output).toContain("reload required");
 		} finally {
 			await harness.shutdown();
 		}
@@ -236,14 +187,11 @@ describe("manager behavior contract", () => {
 			let rendered = "";
 			let renderedNarrow = "";
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "tools");
 				rendered = component.render(180).join("\n");
@@ -252,7 +200,6 @@ describe("manager behavior contract", () => {
 				component.handleInput("down");
 				component.handleInput(" ");
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -326,14 +273,11 @@ describe("manager behavior contract", () => {
 		try {
 			const rendered: string[] = [];
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "tools");
 				rendered.push(component.render(180).join("\n"));
@@ -345,7 +289,6 @@ describe("manager behavior contract", () => {
 				rendered.push(component.render(180).join("\n"));
 				component.handleInput(" ");
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -397,13 +340,11 @@ describe("manager behavior contract", () => {
 						disabledContexts: [],
 						preset: {
 							name: "focus",
-							customTools: true,
 							appliedTools: ["read"],
 							originalState: {
 								provider: "fixture",
 								model: "base",
 								thinkingLevel: "medium",
-								tools: ["read", "bash", "edit"],
 							},
 						},
 					},
@@ -588,7 +529,6 @@ describe("manager behavior contract", () => {
 				version: 2,
 				preset: {
 					name: "focus",
-					customTools: false,
 					appliedTools: ["read"],
 				},
 			});

@@ -1,12 +1,10 @@
 import type {
 	BuildSystemPromptOptions,
 	ExtensionAPI,
-	ResolvedResource,
 } from "@earendil-works/pi-coding-agent";
 import type { ContextRecord, ManagerSnapshot, SkillRecord } from "./types";
 
 interface PromptResourceInventory {
-	customPromptActive: boolean;
 	customSystemPrompt?: string;
 	appendedSystemPrompt?: string;
 	toolSnippets: Record<string, string>;
@@ -46,7 +44,6 @@ export function buildPromptResourceInventory(
 		),
 	);
 	return {
-		customPromptActive: Boolean(options.customPrompt),
 		customSystemPrompt: options.customPrompt,
 		appendedSystemPrompt: options.appendSystemPrompt,
 		toolSnippets,
@@ -75,10 +72,6 @@ export function buildLoadedSkillInventory(
 	return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function enabledResourceCount(resources: ResolvedResource[]): number {
-	return resources.filter((resource) => resource.enabled).length;
-}
-
 export function buildPublicSnapshot(
 	snapshot: ManagerSnapshot,
 	baseTools: Iterable<string>,
@@ -97,18 +90,6 @@ export function buildPublicSnapshot(
 		contexts: {
 			enabled: snapshot.enabledContexts.size,
 			total: snapshot.contexts.length,
-		},
-		prompts: {
-			enabled: enabledResourceCount(snapshot.prompts),
-			total: snapshot.prompts.length,
-		},
-		themes: {
-			enabled: enabledResourceCount(snapshot.themes),
-			total: snapshot.themes.length,
-		},
-		extensions: {
-			enabled: enabledResourceCount(snapshot.extensions),
-			total: snapshot.extensions.length,
 		},
 	};
 }

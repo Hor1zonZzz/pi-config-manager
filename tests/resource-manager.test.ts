@@ -39,14 +39,11 @@ describe("resource manager behavior", () => {
 			let renderRequests = 0;
 			harness.setCustomImplementation(async (factory, customOptions) => {
 				overlayOptions = customOptions;
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender: () => renderRequests++ },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "tools");
 				rendered = component.render(100);
@@ -56,7 +53,6 @@ describe("resource manager behavior", () => {
 				component.handleInput("left");
 				component.handleInput(" ");
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -120,19 +116,15 @@ describe("resource manager behavior", () => {
 		await harness.start();
 		try {
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "tools");
 				component.handleInput(" ");
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -179,36 +171,23 @@ describe("resource manager behavior", () => {
 		try {
 			await harness.commands.get("preset").handler("focus", harness.ctx);
 			let rendered = "";
-			let extensionsRendered = "";
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "tools");
 				rendered = component.render(100).join("\n");
 				component.handleInput(" ");
-				component.handleInput("tab");
-				component.handleInput("tab");
-				component.handleInput("tab");
-				component.handleInput("tab");
-				component.handleInput("tab");
-				extensionsRendered = component.render(100).join("\n");
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(rendered).toContain("View: Effective");
 			expect(rendered).toContain("Edit: Session · focus");
 			expect(rendered).not.toContain("G target");
-			expect(extensionsRendered).toContain("View/Edit: Pi settings");
-			expect(extensionsRendered).not.toContain("Edit: Session");
 			expect(existsSync(join(env.agentDir, "resource-settings.json"))).toBe(
 				false,
 			);
@@ -220,7 +199,6 @@ describe("resource manager behavior", () => {
 				.at(-1)?.data;
 			expect(state.preset).toMatchObject({
 				name: "focus",
-				customTools: true,
 				appliedTools: ["read"],
 			});
 			expect(new Set(state.tools)).toEqual(new Set(["read", "bash"]));
@@ -249,19 +227,15 @@ describe("resource manager behavior", () => {
 		try {
 			await harness.commands.get("preset").handler("focus", harness.ctx);
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "contexts");
 				component.handleInput(" ");
 				component.handleInput("escape");
-				return result;
 			});
 			await harness.commands.get("config-manager").handler("", harness.ctx);
 			let state = harness.entries
@@ -322,20 +296,16 @@ describe("resource manager behavior", () => {
 		try {
 			let rendered = "";
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "skills");
 				rendered = component.render(100).join("\n");
 				component.handleInput(" ");
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);

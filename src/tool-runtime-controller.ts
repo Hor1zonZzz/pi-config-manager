@@ -1,13 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { PolicyManager, PolicyInitialization } from "./policy-manager";
 import { uniqueSorted } from "./resource-policy-state";
-import type { ManagerSnapshot, RuntimeLayer } from "./types";
+import type { ManagerState, RuntimeLayer } from "./types";
 
 type PolicyPhase = "collecting" | "initializing" | "ready" | "stopped";
 
 interface ToolRuntimeHost {
-	getSnapshot: () => ManagerSnapshot;
-	setSnapshot: (snapshot: ManagerSnapshot) => void;
+	getState: () => ManagerState;
+	setState: (state: ManagerState) => void;
 	requestHudRender: () => void;
 	emitStateChanged: () => void;
 }
@@ -48,8 +48,8 @@ export class ToolRuntimeController {
 		this.pi.setActiveTools(Array.from(this.policy.resolveEffectiveTools()));
 		this.lastAppliedTools = new Set(this.pi.getActiveTools());
 		this.hasAppliedTools = true;
-		this.host.setSnapshot({
-			...this.host.getSnapshot(),
+		this.host.setState({
+			...this.host.getState(),
 			activeTools: new Set(this.lastAppliedTools),
 			runtimeToolControls: this.policy.resolveRuntimeToolControls(),
 		});
@@ -73,16 +73,16 @@ export class ToolRuntimeController {
 							.filter((name) => !this.lastAppliedTools.has(name)),
 					);
 				}
-				const snapshot = this.host.getSnapshot();
+				const state = this.host.getState();
 				const allTools = this.pi.getAllTools();
 				this.policy.setDiscoveredTools(allTools.map((tool) => tool.name));
-				this.host.setSnapshot({
-					...snapshot,
+				this.host.setState({
+					...state,
 					tools: allTools
 						.map((tool) => ({
 							name: tool.name,
 							description: tool.description,
-							promptSnippet: snapshot.toolSnippets[tool.name],
+							promptSnippet: state.toolSnippets[tool.name],
 							parameters: tool.parameters,
 							promptGuidelines: tool.promptGuidelines,
 							sourceInfo: tool.sourceInfo,

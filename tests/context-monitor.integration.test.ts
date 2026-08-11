@@ -79,13 +79,11 @@ describe("prompt and context behavior", () => {
 						disabledContexts: ["/project/EXTRA.md"],
 						preset: {
 							name: "focus",
-							customTools: true,
 							appliedTools: ["read"],
 							originalState: {
 								provider: "fixture",
 								model: "base",
 								thinkingLevel: "medium",
-								tools: ["read"],
 							},
 						},
 					},
@@ -144,14 +142,11 @@ describe("prompt and context behavior", () => {
 
 			const rendered: string[] = [];
 			harness.setCustomImplementation(async (factory) => {
-				let resultValue: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						resultValue = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "contexts");
 				for (let index = 0; index < 4; index += 1) {
@@ -159,7 +154,6 @@ describe("prompt and context behavior", () => {
 					component.handleInput("down");
 				}
 				component.handleInput("escape");
-				return resultValue;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -208,18 +202,14 @@ describe("prompt and context behavior", () => {
 
 			let overview = "";
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				overview = component.render(180).join("\n");
 				component.handleInput("escape");
-				return result;
 			});
 			await harness.commands.get("config-manager").handler("", harness.ctx);
 			expect(overview).toContain("Contexts  3/3 loaded context resources");
@@ -243,19 +233,15 @@ describe("prompt and context behavior", () => {
 		try {
 			let rendered = "";
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "contexts");
 				rendered = component.render(180).join("\n");
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -303,14 +289,11 @@ describe("prompt and context behavior", () => {
 			await harness.trigger("agent_start");
 			const rendered: string[] = [];
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "contexts");
 				for (let index = 0; index < contexts.length; index += 1) {
@@ -318,7 +301,6 @@ describe("prompt and context behavior", () => {
 					component.handleInput("down");
 				}
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -371,19 +353,15 @@ describe("prompt and context behavior", () => {
 			await harness.trigger("agent_start");
 			let rendered = "";
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "skills");
 				rendered = component.render(180).join("\n");
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -511,19 +489,15 @@ describe("prompt and context behavior", () => {
 		try {
 			const rendered: string[] = [];
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, "tools");
 				rendered.push(component.render(180).join("\n"));
 				component.handleInput("escape");
-				return result;
 			});
 
 			await harness.commands.get("config-manager").handler("", harness.ctx);
@@ -557,19 +531,15 @@ describe("prompt and context behavior", () => {
 		try {
 			let targetTab: "skills" | "contexts" = "skills";
 			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
 				const component = await factory(
 					{ requestRender() {} },
 					createTheme(),
 					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
+					() => {},
 				);
 				navigateToManagerTab(component, targetTab);
 				component.handleInput(" ");
 				component.handleInput("escape");
-				return result;
 			});
 			await harness.commands.get("config-manager").handler("", harness.ctx);
 			let state = harness.emissions

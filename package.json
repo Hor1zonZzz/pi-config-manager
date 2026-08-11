@@ -1,7 +1,7 @@
 {
   "name": "pi-config-manager",
   "version": "0.2.0",
-  "description": "Manage Pi presets, tools, skills, contexts, prompts, themes, and extensions from one package.",
+  "description": "Manage Pi tool, skill, and context policies with session-scoped presets.",
   "type": "module",
   "license": "MIT",
   "author": {
@@ -24,8 +24,6 @@
     "tools",
     "skills",
     "context",
-    "prompt-templates",
-    "themes",
     "presets"
   ],
   "files": [

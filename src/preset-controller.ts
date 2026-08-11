@@ -4,33 +4,24 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { selectPreset } from "./manager-ui";
 import type { PolicyManager } from "./policy-manager";
-import type { PresetBorderEditor } from "./preset-editor";
 import type { Preset, PresetsConfig } from "./presets";
 import {
 	resetSessionResourceOverrides,
 	uniqueSorted,
 } from "./resource-policy-state";
-import type {
-	ManagerSnapshot,
-	PresetOriginalState,
-	SessionResourceState,
-} from "./types";
+import type { PresetOriginalState, SessionResourceState } from "./types";
 
 interface PresetControllerHost {
 	getSessionState: () => SessionResourceState;
 	setSessionState: (state: SessionResourceState) => void;
-	getSnapshot: () => ManagerSnapshot;
-	setSnapshot: (snapshot: ManagerSnapshot) => void;
 	reconcileTools: () => void;
 	persistSession: () => void;
-	requestHudRender: () => void;
 }
 
 export class PresetController {
 	private presets: PresetsConfig = {};
 	private activePresetName?: string;
 	private activePreset?: Preset;
-	private editor?: PresetBorderEditor;
 
 	constructor(
 		private readonly pi: ExtensionAPI,
@@ -50,21 +41,6 @@ export class PresetController {
 		this.presets = presets;
 	}
 
-	clearEditor(): void {
-		this.editor = undefined;
-	}
-
-	setEditor(editor: PresetBorderEditor): void {
-		this.editor = editor;
-	}
-
-	label(): string {
-		const mode = this.activePresetName ?? "default";
-		return this.host.getSessionState().preset?.customTools
-			? `${mode} (custom tools)`
-			: mode;
-	}
-
 	clearActiveForFlag(): void {
 		const state = resetSessionResourceOverrides(this.host.getSessionState());
 		state.preset = undefined;
@@ -73,26 +49,8 @@ export class PresetController {
 		this.activePreset = undefined;
 	}
 
-	updateStatus(ctx: ExtensionContext): void {
-		this.host.setSnapshot({
-			...this.host.getSnapshot(),
-			presetName: this.activePresetName,
-			presetInstructions: this.activePreset?.instructions,
-		});
-		ctx.ui.setStatus("preset", undefined);
-		ctx.ui.setWidget("preset", undefined);
-		this.editor?.requestRender();
-		this.host.requestHudRender();
-	}
-
 	private setPolicy(preset: Preset, tools: string[] | undefined): void {
 		this.policy.setProfile({ tools, skills: preset.skills });
-		const snapshot = this.host.getSnapshot();
-		this.host.setSnapshot({
-			...snapshot,
-			enabledSkills: this.policy.resolveEnabledSkills(snapshot.skills),
-			enabledContexts: this.policy.resolveEnabledContexts(snapshot.contexts),
-		});
 	}
 
 	private currentOriginalState(ctx: ExtensionContext): PresetOriginalState {
@@ -100,7 +58,6 @@ export class PresetController {
 			provider: ctx.model?.provider,
 			model: ctx.model?.id,
 			thinkingLevel: this.pi.getThinkingLevel(),
-			tools: Array.from(this.policy.resolveBaseTools()),
 		};
 	}
 
@@ -162,7 +119,6 @@ export class PresetController {
 		const state = resetSessionResourceOverrides(currentState);
 		state.preset = {
 			name,
-			customTools: false,
 			appliedTools,
 			originalState,
 		};
@@ -171,7 +127,6 @@ export class PresetController {
 		this.setPolicy(preset, appliedTools);
 		this.host.reconcileTools();
 		this.host.persistSession();
-		this.updateStatus(ctx);
 	}
 
 	async clear(ctx: ExtensionContext): Promise<void> {
@@ -192,18 +147,11 @@ export class PresetController {
 			if (model) await this.pi.setModel(model);
 		}
 		if (originalState) this.pi.setThinkingLevel(originalState.thinkingLevel);
-		const snapshot = this.host.getSnapshot();
-		this.host.setSnapshot({
-			...snapshot,
-			enabledSkills: this.policy.resolveEnabledSkills(snapshot.skills),
-			enabledContexts: this.policy.resolveEnabledContexts(snapshot.contexts),
-		});
 		this.host.reconcileTools();
 		this.host.persistSession();
-		this.updateStatus(ctx);
 	}
 
-	restore(ctx: ExtensionContext): void {
+	restore(): void {
 		let state = this.host.getSessionState();
 		const presetState = state.preset;
 		const preset = presetState ? this.presets[presetState.name] : undefined;
@@ -215,7 +163,6 @@ export class PresetController {
 			state = resetSessionResourceOverrides(state);
 			this.host.setSessionState(state);
 			this.policy.setSessionState(state);
-			this.updateStatus(ctx);
 			return;
 		}
 		this.activePresetName = presetState.name;
@@ -226,7 +173,6 @@ export class PresetController {
 				this.pi.getAllTools().some((candidate) => candidate.name === tool),
 			);
 		this.setPolicy(preset, tools);
-		this.updateStatus(ctx);
 	}
 
 	async showSelector(ctx: ExtensionContext): Promise<void> {

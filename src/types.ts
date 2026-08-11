@@ -1,16 +1,6 @@
-import type {
-	ResolvedResource,
-	SourceInfo,
-} from "@earendil-works/pi-coding-agent";
+import type { SourceInfo } from "@earendil-works/pi-coding-agent";
 
-export type ResourceTab =
-	| "overview"
-	| "tools"
-	| "skills"
-	| "contexts"
-	| "prompts"
-	| "themes"
-	| "extensions";
+export type ResourceTab = "overview" | "tools" | "skills" | "contexts";
 
 export interface ResourceSettings {
 	version: 1;
@@ -45,12 +35,10 @@ export interface PresetOriginalState {
 	provider?: string;
 	model?: string;
 	thinkingLevel: PresetThinkingLevel;
-	tools: string[];
 }
 
 export interface PresetSessionState {
 	name: string;
-	customTools: boolean;
 	appliedTools?: string[];
 	originalState: PresetOriginalState;
 }
@@ -103,51 +91,29 @@ export interface EffectiveSystemPrompt {
 	source: "command" | "agent-start";
 }
 
-export interface ManagerSnapshot {
+export interface ManagerState {
 	ready: boolean;
-	customPromptActive: boolean;
 	customSystemPrompt?: string;
 	appendedSystemPrompt?: string;
-	presetInstructions?: string;
 	contextsKnown: boolean;
-	extensionsKnown: boolean;
-	promptsKnown: boolean;
-	themesKnown: boolean;
 	tools: ToolRecord[];
 	toolSnippets: Record<string, string>;
 	effectiveSystemPrompt?: EffectiveSystemPrompt;
 	activeTools: Set<string>;
 	runtimeToolControls: Map<string, RuntimeToolControl>;
-	projectDisabledTools: Set<string>;
 	skills: SkillRecord[];
+	contexts: ContextRecord[];
+}
+
+export interface ManagerSnapshot extends ManagerState {
+	customPromptActive: boolean;
+	presetInstructions?: string;
+	projectDisabledTools: Set<string>;
 	enabledSkills: Set<string>;
 	projectDisabledSkills: Set<string>;
-	contexts: ContextRecord[];
 	enabledContexts: Set<string>;
 	projectDisabledContexts: Set<string>;
-	extensions: ResolvedResource[];
-	prompts: ResolvedResource[];
-	themes: ResolvedResource[];
 	presetName?: string;
-}
-
-export type PackageResourceKind = "extensions" | "prompts" | "themes";
-
-export interface PackageResourceCatalog {
-	extensions: ResolvedResource[];
-	prompts: ResolvedResource[];
-	themes: ResolvedResource[];
-}
-
-export interface PackageResourceChange {
-	kind: PackageResourceKind;
-	resource: ResolvedResource;
-	enabled: boolean;
-}
-
-export interface ExtensionChange {
-	resource: ResolvedResource;
-	enabled: boolean;
 }
 
 export const DEFAULT_RESOURCE_SETTINGS: ResourceSettings = {

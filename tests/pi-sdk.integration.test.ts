@@ -59,14 +59,11 @@ function createInteractiveUi(rendered: string[]) {
 		setHeader() {},
 		setTitle() {},
 		async custom(factory: any) {
-			let result: "close" | "save" = "close";
 			const component = await factory(
 				{ requestRender() {} },
 				createTheme(),
 				createKeybindings(),
-				(value: "close" | "save") => {
-					result = value;
-				},
+				() => {},
 			);
 			navigateToManagerTab(component, "contexts");
 			for (let index = 0; index < 4; index += 1) {
@@ -82,7 +79,6 @@ function createInteractiveUi(rendered: string[]) {
 				component.handleInput("down");
 			}
 			component.handleInput("escape");
-			return result;
 		},
 		pasteToEditor() {},
 		setEditorText() {},

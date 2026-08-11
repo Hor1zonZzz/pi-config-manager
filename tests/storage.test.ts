@@ -44,5 +44,38 @@ describe("storage compatibility", () => {
 		cloned.enabledSkills.push("changed");
 		expect(normalized?.enabledSkills).toEqual(["browser"]);
 	});
+
+	test("ignores removed preset metadata in existing version 2 entries", () => {
+		expect(
+			normalizeSessionState({
+				version: 2,
+				enabledSkills: [],
+				disabledSkills: [],
+				enabledContexts: [],
+				disabledContexts: [],
+				preset: {
+					name: "focus",
+					customTools: true,
+					appliedTools: ["read"],
+					originalState: {
+						thinkingLevel: "medium",
+						tools: ["read", "bash"],
+					},
+				},
+			}),
+		).toEqual({
+			version: 2,
+			tools: undefined,
+			enabledSkills: [],
+			disabledSkills: [],
+			enabledContexts: [],
+			disabledContexts: [],
+			preset: {
+				name: "focus",
+				appliedTools: ["read"],
+				originalState: { thinkingLevel: "medium" },
+			},
+		});
+	});
 });
 

@@ -41,14 +41,11 @@ export function normalizeResourceSettings(value: unknown): ResourceSettings {
 function normalizeOriginalState(value: unknown): PresetOriginalState | undefined {
 	if (!value || typeof value !== "object") return undefined;
 	const data = value as Record<string, unknown>;
-	if (!isPresetThinkingLevel(data.thinkingLevel) || !Array.isArray(data.tools)) {
-		return undefined;
-	}
+	if (!isPresetThinkingLevel(data.thinkingLevel)) return undefined;
 	return {
 		provider: typeof data.provider === "string" ? data.provider : undefined,
 		model: typeof data.model === "string" ? data.model : undefined,
 		thinkingLevel: data.thinkingLevel,
-		tools: strings(data.tools),
 	};
 }
 
@@ -59,7 +56,6 @@ function normalizePresetState(value: unknown): PresetSessionState | undefined {
 	if (typeof data.name !== "string" || !originalState) return undefined;
 	return {
 		name: data.name,
-		customTools: data.customTools === true,
 		appliedTools: Array.isArray(data.appliedTools)
 			? strings(data.appliedTools)
 			: undefined,

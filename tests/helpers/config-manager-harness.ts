@@ -40,7 +40,6 @@ export interface HarnessOptions {
 	promptOptions?: Record<string, unknown>;
 	presetFlag?: string;
 	models?: Array<{ provider: string; id: string; authenticated?: boolean }>;
-	confirm?: boolean;
 }
 
 export function formatContextSection(files: ContextFixture[]): string {
@@ -63,24 +62,9 @@ export function createTheme() {
 
 export function navigateToManagerTab(
 	component: { handleInput(data: string): void },
-	tab:
-		| "overview"
-		| "tools"
-		| "skills"
-		| "contexts"
-		| "prompts"
-		| "themes"
-		| "extensions",
+	tab: "overview" | "tools" | "skills" | "contexts",
 ): void {
-	const tabs = [
-		"overview",
-		"tools",
-		"skills",
-		"contexts",
-		"prompts",
-		"themes",
-		"extensions",
-	] as const;
+	const tabs = ["overview", "tools", "skills", "contexts"] as const;
 	const tabIndex = tabs.indexOf(tab);
 	for (let index = 0; index < tabIndex; index += 1) {
 		component.handleInput("tab");
@@ -169,9 +153,7 @@ export function createTestEnvironment() {
 		let customImplementation:
 			| ((factory: any, customOptions: any) => Promise<any>)
 			| undefined;
-		let editorFactory: any;
 		let thinkingLevel = "medium";
-		let reloads = 0;
 		let currentModel = { provider: "fixture", id: "base", authenticated: true };
 		const models = options.models ?? [currentModel];
 
@@ -255,19 +237,9 @@ export function createTestEnvironment() {
 				else widgets.set(name, value);
 			},
 			async custom(factory: any, customOptions: any) {
-				if (!customImplementation) return "close";
+				if (!customImplementation) return undefined;
 				return customImplementation(factory, customOptions);
 			},
-			async confirm() {
-				return options.confirm ?? false;
-			},
-			getEditorComponent() {
-				return editorFactory;
-			},
-			setEditorComponent(factory: any) {
-				editorFactory = factory;
-			},
-			setStatus() {},
 		};
 
 		const ctx = {
@@ -281,9 +253,6 @@ export function createTestEnvironment() {
 			isProjectTrusted: () => options.trusted ?? false,
 			getSystemPrompt: () => systemPrompt,
 			getSystemPromptOptions: () => promptOptions,
-			async reload() {
-				reloads += 1;
-			},
 			get model() {
 				return currentModel;
 			},
@@ -328,7 +297,6 @@ export function createTestEnvironment() {
 			getActiveTools: () => [...activeTools],
 			getModel: () => currentModel,
 			getThinkingLevel: () => thinkingLevel,
-			getReloads: () => reloads,
 			setExternalActiveTools: (names: string[]) => {
 				activeTools = [...names];
 			},
@@ -344,18 +312,6 @@ export function createTestEnvironment() {
 		};
 	}
 
-	function writeAgentSettings(value: unknown) {
-		mkdirSync(agentDir, { recursive: true });
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			`${JSON.stringify(value, null, 2)}\n`,
-			"utf8",
-		);
-	}
-
-	function readAgentSettings(): any {
-		return JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
-	}
 
 	function readResourceSettings(): any {
 		return JSON.parse(
@@ -392,8 +348,6 @@ export function createTestEnvironment() {
 		setup,
 		teardown,
 		createHarness,
-		writeAgentSettings,
-		readAgentSettings,
 		readResourceSettings,
 		writeProjectResourceSettings,
 		writePresets,
