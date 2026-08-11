@@ -105,24 +105,18 @@ describe("package resource settings compatibility", () => {
 		expect(pkg.skills).toEqual(["skills"]);
 	});
 
-	test("resolves all native package resource kinds with their enabled state", async () => {
+	test("resolves managed package resources with their enabled state", async () => {
 		mkdirSync(join(env.agentDir, "extensions"), { recursive: true });
-		mkdirSync(join(env.agentDir, "skills", "hidden"), { recursive: true });
 		mkdirSync(join(env.agentDir, "prompts"), { recursive: true });
 		mkdirSync(join(env.agentDir, "themes"), { recursive: true });
 		writeFileSync(
 			join(env.agentDir, "extensions", "fixture.ts"),
 			"export default () => {};\n",
 		);
-		writeFileSync(
-			join(env.agentDir, "skills", "hidden", "SKILL.md"),
-			"---\nname: hidden\ndescription: Hidden skill\n---\n",
-		);
 		writeFileSync(join(env.agentDir, "prompts", "review.md"), "# Review\n");
 		writeFileSync(join(env.agentDir, "themes", "fixture.json"), "{}\n");
 		writeAgentSettings({
 			extensions: ["-extensions/fixture.ts"],
-			skills: ["-skills/hidden/SKILL.md"],
 			prompts: ["-prompts/review.md"],
 			themes: ["-themes/fixture.json"],
 		});
@@ -132,13 +126,11 @@ describe("package resource settings compatibility", () => {
 			resources.extensions,
 		);
 		expect(resources.extensions).toHaveLength(1);
-		expect(resources.skills).toHaveLength(1);
 		expect(resources.prompts).toHaveLength(1);
 		expect(resources.themes).toHaveLength(1);
 		expect(
 			[
 				...resources.extensions,
-				...resources.skills,
 				...resources.prompts,
 				...resources.themes,
 			].every((resource) => resource.enabled === false),

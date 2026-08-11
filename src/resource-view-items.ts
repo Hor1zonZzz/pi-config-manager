@@ -26,7 +26,7 @@ import type {
 
 export function packageKindForTab(
 	tab: ResourceTab,
-): Exclude<PackageResourceKind, "skills"> | undefined {
+): PackageResourceKind | undefined {
 	if (tab === "prompts" || tab === "themes" || tab === "extensions") {
 		return tab;
 	}
@@ -42,16 +42,6 @@ export function packageResourceId(
 
 function resourceSourceDetail(resource: ResolvedResource): string {
 	return `${resource.metadata.scope}/${resource.metadata.origin} · ${resource.metadata.source}\n${resource.path}`;
-}
-
-export function resolvedSourceInfo(resource: ResolvedResource): SourceInfo {
-	return {
-		path: resource.path,
-		source: resource.metadata.source,
-		scope: resource.metadata.scope,
-		origin: resource.metadata.origin,
-		baseDir: resource.metadata.baseDir,
-	};
 }
 
 function sourceDetail(sourceInfo: ToolRecord["sourceInfo"]): string {
@@ -83,9 +73,8 @@ function buildOverviewItems(snapshot: ManagerSnapshot): ViewItem[] {
 		{
 			id: "skills",
 			label: "Skills",
-			state: `${snapshot.enabledSkills.size}/${snapshot.skills.length} loaded · ${snapshot.unloadedSkills.length} unloaded`,
-			detail:
-				"Pi-loaded skills use manager policy; skills disabled in Pi settings require reload.",
+			state: `${snapshot.enabledSkills.size}/${snapshot.skills.length}`,
+			detail: "Pi-loaded skills and their effective manager policy state.",
 		},
 		{
 			id: "contexts",
@@ -347,70 +336,8 @@ function buildLoadedSkillItem(
 	};
 }
 
-function buildUnloadedSkillItem(
-	snapshot: ManagerSnapshot,
-	skill: SkillRecord,
-	stagedPackageResources: Map<string, PackageResourceChange>,
-): ViewItem | undefined {
-	const resource = skill.nativeResource;
-	if (!resource) return undefined;
-	const id = packageResourceId("skills", resource);
-	const staged = stagedPackageResources.get(id);
-	const enabled = staged?.enabled ?? false;
-	const preview = skillPromptPreview(
-		skill,
-		skill.sourceInfo ?? resolvedSourceInfo(resource),
-	);
-	let state = "not loaded by Pi settings · reload required";
-	if (staged) {
-		const action = enabled ? "enable" : "disable";
-		state = `${action} staged · reload required`;
-	}
-	return {
-		id,
-		label: skill.name,
-		enabled,
-		state,
-		detail: resourceSourceDetail(resource),
-		monitor: showCapturedSystemPrompt(
-			snapshot,
-			{
-				title: `Skill · ${skill.name}`,
-				channel: "system prompt skill catalog",
-				status: "not loaded by Pi settings",
-				statusColor: "dim",
-				content: preview.content,
-				highlightTarget: preview.highlightTarget,
-				note: "Press Space to stage enabling this skill in Pi settings, then S to save and reload.",
-			},
-			{
-				showFullPrompt: true,
-				expectation: {
-					shouldBePresent: false,
-					stateLabel: "not loaded",
-				},
-			},
-		),
-	};
-}
-
-function buildSkillItems(
-	snapshot: ManagerSnapshot,
-	stagedPackageResources: Map<string, PackageResourceChange>,
-): ViewItem[] {
-	const loadedItems = snapshot.skills.map((skill) =>
-		buildLoadedSkillItem(snapshot, skill),
-	);
-	const unloadedItems: ViewItem[] = [];
-	for (const skill of snapshot.unloadedSkills) {
-		const item = buildUnloadedSkillItem(
-			snapshot,
-			skill,
-			stagedPackageResources,
-		);
-		if (item) unloadedItems.push(item);
-	}
-	return [...loadedItems, ...unloadedItems];
+function buildSkillItems(snapshot: ManagerSnapshot): ViewItem[] {
+	return snapshot.skills.map((skill) => buildLoadedSkillItem(snapshot, skill));
 }
 
 function buildContextItem(
@@ -465,7 +392,7 @@ function buildContextItems(snapshot: ManagerSnapshot): ViewItem[] {
 }
 
 function buildPackageItems(
-	kind: Exclude<PackageResourceKind, "skills">,
+	kind: PackageResourceKind,
 	snapshot: ManagerSnapshot,
 	stagedPackageResources: Map<string, PackageResourceChange>,
 ): ViewItem[] {
@@ -490,9 +417,7 @@ export function buildResourceViewItems(
 ): ViewItem[] {
 	if (tab === "overview") return buildOverviewItems(snapshot);
 	if (tab === "tools") return buildToolItems(snapshot);
-	if (tab === "skills") {
-		return buildSkillItems(snapshot, stagedPackageResources);
-	}
+	if (tab === "skills") return buildSkillItems(snapshot);
 	if (tab === "contexts") return buildContextItems(snapshot);
 	const packageKind = packageKindForTab(tab);
 	return packageKind

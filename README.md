@@ -58,7 +58,7 @@ Start Pi, then run:
 2. Press `Tab` to move between resource tabs.
 3. Type to filter the current list.
 4. Press `Space` or `Enter` to toggle the selected resource in the automatically selected target.
-5. After staging a Pi package-resource change—including a native-disabled Skill—press `S` to save and reload.
+5. After staging a Prompt Template, Theme, or Extension change, press `S` to save and reload.
 
 ### Keyboard controls
 
@@ -111,7 +111,6 @@ Unconstrained tool changes apply immediately through `pi.setActiveTools()`. Conf
 
 Loaded skills use Config Manager's immediate Global/Session/Preset policy. Disabled skills are removed from Pi's standard system-prompt skill catalog, and invoking a disabled `/skill:<name>` command is blocked with a notification.
 
-Skills disabled by Pi's native package settings are still listed as `not loaded by Pi settings`. Enabling one is staged in Pi settings and requires `S` followed by reload.
 
 ### Contexts and Prompt Sources
 
@@ -249,7 +248,7 @@ The former `preset:tools-changed`, `preset:skills-changed`, and `config-manager:
 - Skill and context filtering expects Pi's standard prompt sections. If a custom system prompt removes or rewrites those sections, Config Manager leaves the prompt unchanged and warns on every affected run. The effective-prompt verifier reports disabled resources that remain visible after `agent_start`; this is detection, not a security sandbox.
 - The visual manager requires TUI mode. In RPC, JSON, and print modes, the overlay is unavailable.
 - Static package inventory reflects Pi settings resolution. Pi 0.83 does not expose the current session's temporary `--extension` or SDK inline-extension inventory through `ExtensionAPI`.
-- Prompt Template, Theme, native Skill-load, and Extension changes require a Pi reload.
+- Prompt Template, Theme, and Extension changes require a Pi reload.
 
 ## Development
 

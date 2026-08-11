@@ -172,11 +172,6 @@ function setTopLevelPaths(
 		else settingsManager.setExtensionPaths(paths);
 		return;
 	}
-	if (kind === "skills") {
-		if (project) settingsManager.setProjectSkillPaths(paths);
-		else settingsManager.setSkillPaths(paths);
-		return;
-	}
 	if (kind === "prompts") {
 		if (project) settingsManager.setProjectPromptTemplatePaths(paths);
 		else settingsManager.setPromptTemplatePaths(paths);
@@ -200,7 +195,6 @@ export async function resolvePackageResources(
 		extensions: [...resolved.extensions].sort((a, b) =>
 			a.path.localeCompare(b.path),
 		),
-		skills: [...resolved.skills].sort((a, b) => a.path.localeCompare(b.path)),
 		prompts: [...resolved.prompts].sort((a, b) => a.path.localeCompare(b.path)),
 		themes: [...resolved.themes].sort((a, b) => a.path.localeCompare(b.path)),
 	};

@@ -17,7 +17,6 @@ afterEach(() => env.teardown());
 const {
 	createHarness,
 	readAgentSettings,
-	writeAgentSettings,
 	writePresets,
 	writeProjectResourceSettings,
 } = env;
@@ -132,50 +131,6 @@ describe("manager behavior contract", () => {
 			expect(output).toContain("View/Edit: Pi settings");
 			expect(output).toContain("staged");
 			expect(output).toContain("reload required");
-		} finally {
-			await harness.shutdown();
-		}
-	});
-
-	test("re-enables a skill disabled in native Pi settings", async () => {
-		const skillPath = join(env.agentDir, "skills", "hidden", "SKILL.md");
-		mkdirSync(join(env.agentDir, "skills", "hidden"), { recursive: true });
-		writeFileSync(
-			skillPath,
-			"---\nname: hidden\ndescription: Hidden skill\n---\n",
-		);
-		writeAgentSettings({ skills: ["-skills/hidden/SKILL.md"] });
-		const harness = createHarness({ confirm: true, skills: [] });
-		await harness.start();
-		try {
-			let renderedBefore = "";
-			let renderedAfter = "";
-			harness.setCustomImplementation(async (factory) => {
-				let result: "close" | "save" = "close";
-				const component = await factory(
-					{ requestRender() {} },
-					createTheme(),
-					createKeybindings(),
-					(value: "close" | "save") => {
-						result = value;
-					},
-				);
-				navigateToManagerTab(component, "skills");
-				renderedBefore = component.render(180).join("\n");
-				component.handleInput(" ");
-				renderedAfter = component.render(180).join("\n");
-				component.handleInput("S");
-				return result;
-			});
-
-			await harness.commands.get("config-manager").handler("", harness.ctx);
-			expect(renderedBefore).toContain("hidden");
-			expect(renderedBefore).toContain(
-				"not loaded by Pi settings · reload required",
-			);
-			expect(renderedAfter).toContain("enable staged · reload required");
-			expect(readAgentSettings().skills).toEqual(["+skills/hidden/SKILL.md"]);
-			expect(harness.getReloads()).toBe(1);
 		} finally {
 			await harness.shutdown();
 		}

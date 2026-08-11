@@ -575,7 +575,7 @@ describe("prompt and context behavior", () => {
 			let state = harness.emissions
 				.filter((event) => event.name === "config-manager:state-changed")
 				.at(-1)?.data;
-			expect(state.skills).toEqual({ enabled: 0, total: 1, unloaded: 0 });
+			expect(state.skills).toEqual({ enabled: 0, total: 1 });
 			targetTab = "contexts";
 			await harness.commands.get("config-manager").handler("", harness.ctx);
 			state = harness.emissions

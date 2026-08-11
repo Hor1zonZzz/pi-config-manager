@@ -1,12 +1,8 @@
-import { basename, dirname } from "node:path";
-import {
-	getAgentDir,
-	loadSkills,
-	type BuildSystemPromptOptions,
-	type ExtensionAPI,
-	type ResolvedResource,
+import type {
+	BuildSystemPromptOptions,
+	ExtensionAPI,
+	ResolvedResource,
 } from "@earendil-works/pi-coding-agent";
-import { resolvedSourceInfo } from "./resource-view-items";
 import type { ContextRecord, ManagerSnapshot, SkillRecord } from "./types";
 
 interface PromptResourceInventory {
@@ -59,46 +55,6 @@ export function buildPromptResourceInventory(
 	};
 }
 
-function unloadedSkillName(resource: ResolvedResource): string {
-	if (basename(resource.path).toLowerCase() === "skill.md") {
-		return basename(dirname(resource.path));
-	}
-	return basename(resource.path).replace(/\.md$/i, "");
-}
-
-function loadDisabledSkill(
-	resource: ResolvedResource,
-	cwd: string,
-): SkillRecord {
-	const loaded = loadSkills({
-		cwd,
-		agentDir: getAgentDir(),
-		skillPaths: [resource.path],
-		includeDefaults: false,
-	}).skills[0];
-	return {
-		name: loaded?.name ?? unloadedSkillName(resource),
-		description: loaded?.description ?? "Disabled in Pi resource settings",
-		path: resource.path,
-		disableModelInvocation: loaded?.disableModelInvocation,
-		sourceInfo: resolvedSourceInfo(resource),
-		nativeResource: resource,
-	};
-}
-
-export function buildUnloadedSkillInventory(
-	resources: ResolvedResource[],
-	loadedSkillPaths: Set<string>,
-	cwd: string,
-): SkillRecord[] {
-	const skills: SkillRecord[] = [];
-	for (const resource of resources) {
-		if (resource.enabled || loadedSkillPaths.has(resource.path)) continue;
-		skills.push(loadDisabledSkill(resource, cwd));
-	}
-	return skills.sort((a, b) => a.name.localeCompare(b.name));
-}
-
 export function buildLoadedSkillInventory(
 	commands: RegisteredCommand[],
 	existingSkills: SkillRecord[],
@@ -136,8 +92,7 @@ export function buildPublicSnapshot(
 		},
 		skills: {
 			enabled: snapshot.enabledSkills.size,
-			total: snapshot.skills.length + snapshot.unloadedSkills.length,
-			unloaded: snapshot.unloadedSkills.length,
+			total: snapshot.skills.length,
 		},
 		contexts: {
 			enabled: snapshot.enabledContexts.size,

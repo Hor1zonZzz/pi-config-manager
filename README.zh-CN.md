@@ -58,7 +58,7 @@ pi -e npm:pi-config-manager
 2. 按 `Tab` 在资源页签之间切换。
 3. 直接输入文字过滤当前列表。
 4. 按 `Space` 或 `Enter` 在自动选择的目标中切换所选资源。
-5. 暂存 Pi Package 资源变更（包括原生设置禁用的 Skill）后，按 `S` 保存并重新加载。
+5. 暂存 Prompt Template、Theme 或 Extension 变更后，按 `S` 保存并重新加载。
 
 ### 键盘操作
 
@@ -111,7 +111,6 @@ Prompt Templates、Themes 和 Extensions 的变更独立于 Effective 资源策�
 
 已加载的 Skill 使用 Config Manager 的即时 Global/Session/Preset 策略。已禁用的技能会从 Pi 标准系统提示词的技能目录中移除，调用已禁用的 `/skill:<name>` 命令时也会显示通知并阻止展开。
 
-被 Pi 原生 Package 设置禁用的 Skill 仍会显示为 `not loaded by Pi settings`。启用这类 Skill 会先暂存到 Pi 设置，需要按 `S` 保存并重新加载。
 
 ### Contexts 与 Prompt Sources
 
@@ -249,7 +248,7 @@ pi.events.emit("config-manager:layer-clear", {
 - 技能和上下文过滤依赖 Pi 的标准提示词区段。如果自定义系统提示词删除或重写了这些区段，Config Manager 会保留原提示词，并在每个受影响的运行中提醒用户。有效提示词验证器会报告在 `agent_start` 后仍然可见的禁用资源；这属于检测能力，不是安全沙箱。
 - 可视化管理器只支持 TUI 模式；RPC、JSON 和 print 模式不能打开浮层。
 - 静态 Package 清单反映 Pi settings 的解析结果。Pi 0.83 不通过 `ExtensionAPI` 暴露当前 Session 的临时 `--extension` 或 SDK inline extension 清单。
-- Prompt Template、Theme、原生 Skill 加载状态与 Extension 变更需要重新加载 Pi。
+- Prompt Template、Theme 与 Extension 变更需要重新加载 Pi。
 
 ## 开发
 

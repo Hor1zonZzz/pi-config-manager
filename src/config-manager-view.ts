@@ -234,7 +234,7 @@ export class ConfigManagerView implements Component, Focusable {
 		} else {
 			lines.push(...this.renderCompactLayout(items, safeWidth, paneHeight));
 		}
-		lines.push(this.renderFooter(snapshot, safeWidth));
+		lines.push(this.renderFooter(safeWidth));
 		return lines;
 	}
 
@@ -367,10 +367,8 @@ export class ConfigManagerView implements Component, Focusable {
 		);
 	}
 
-	private renderFooter(snapshot: ManagerSnapshot, width: number): string {
-		const canSave =
-			PACKAGE_RESOURCE_TABS.has(this.tab) ||
-			(this.tab === "skills" && snapshot.unloadedSkills.length > 0);
+	private renderFooter(width: number): string {
+		const canSave = PACKAGE_RESOURCE_TABS.has(this.tab);
 		const saveHint = canSave ? " · S save + reload" : "";
 		return truncateToWidth(
 			this.theme.fg(

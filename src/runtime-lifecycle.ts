@@ -175,7 +175,6 @@ export class RuntimeLifecycleController {
 			promptsKnown: false,
 			themesKnown: false,
 			skills: [],
-			unloadedSkills: [],
 			contexts: [],
 			extensions: [],
 			prompts: [],

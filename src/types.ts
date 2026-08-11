@@ -80,7 +80,6 @@ export interface SkillRecord {
 	path: string;
 	disableModelInvocation?: boolean;
 	sourceInfo?: SourceInfo;
-	nativeResource?: ResolvedResource;
 }
 
 export interface ContextRecord {
@@ -121,7 +120,6 @@ export interface ManagerSnapshot {
 	runtimeToolControls: Map<string, RuntimeToolControl>;
 	projectDisabledTools: Set<string>;
 	skills: SkillRecord[];
-	unloadedSkills: SkillRecord[];
 	enabledSkills: Set<string>;
 	projectDisabledSkills: Set<string>;
 	contexts: ContextRecord[];
@@ -133,15 +131,10 @@ export interface ManagerSnapshot {
 	presetName?: string;
 }
 
-export type PackageResourceKind =
-	| "extensions"
-	| "skills"
-	| "prompts"
-	| "themes";
+export type PackageResourceKind = "extensions" | "prompts" | "themes";
 
 export interface PackageResourceCatalog {
 	extensions: ResolvedResource[];
-	skills: ResolvedResource[];
 	prompts: ResolvedResource[];
 	themes: ResolvedResource[];
 }

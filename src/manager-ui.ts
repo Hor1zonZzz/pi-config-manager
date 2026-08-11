@@ -81,25 +81,7 @@ function planResourceToggle(
 			change: { kind: packageKind, resource, enabled: !current },
 		};
 	}
-	if (tab === "skills") {
-		const unloaded = snapshot.unloadedSkills.find(
-			(skill) =>
-				skill.nativeResource &&
-				packageResourceId("skills", skill.nativeResource) === id,
-		);
-		if (!unloaded?.nativeResource) return { action: "policy", tab, id };
-		const current = staged.get(id)?.enabled ?? false;
-		return {
-			action: "stage",
-			id,
-			change: {
-				kind: "skills",
-				resource: unloaded.nativeResource,
-				enabled: !current,
-			},
-		};
-	}
-	if (tab === "tools" || tab === "contexts") {
+	if (tab === "tools" || tab === "skills" || tab === "contexts") {
 		return { action: "policy", tab, id };
 	}
 	return { action: "ignore" };
@@ -289,7 +271,7 @@ export function installResourceHud(
 				const themeCount = snapshot.themesKnown
 					? `${snapshot.themes.filter((item) => item.enabled).length}/${snapshot.themes.length}`
 					: "…";
-				const second = `  tools ${snapshot.activeTools.size}/${snapshot.tools.length} · skills ${snapshot.enabledSkills.size}/${snapshot.skills.length}+${snapshot.unloadedSkills.length} unloaded · contexts ${contextCount}`;
+				const second = `  tools ${snapshot.activeTools.size}/${snapshot.tools.length} · skills ${snapshot.enabledSkills.size}/${snapshot.skills.length} · contexts ${contextCount}`;
 				const third = `  extensions ${extensionCount} · prompts ${promptCount} · themes ${themeCount}${snapshot.presetName ? ` · preset ${snapshot.presetName}` : ""}`;
 				return [
 					first,

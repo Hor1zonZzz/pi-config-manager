@@ -8,7 +8,6 @@ import {
 	buildLoadedSkillInventory,
 	buildPromptResourceInventory,
 	buildPublicSnapshot,
-	buildUnloadedSkillInventory,
 } from "./resource-inventory";
 import { resolvePackageResources } from "./extensions";
 import { registerManagerCommands } from "./manager-commands";
@@ -75,7 +74,6 @@ export default function piConfigManager(pi: ExtensionAPI) {
 		runtimeToolControls: new Map(),
 		projectDisabledTools: new Set(),
 		skills: [],
-		unloadedSkills: [],
 		enabledSkills: new Set(),
 		projectDisabledSkills: new Set(),
 		contexts: [],
@@ -196,14 +194,6 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				ctx.cwd,
 				ctx.isProjectTrusted(),
 			);
-			const loadedSkillPaths = new Set(
-				snapshot.skills.map((skill) => skill.path),
-			);
-			const unloadedSkills = buildUnloadedSkillInventory(
-				resources.skills,
-				loadedSkillPaths,
-				ctx.cwd,
-			);
 			snapshot = {
 				...snapshot,
 				extensionsKnown: true,
@@ -212,7 +202,6 @@ export default function piConfigManager(pi: ExtensionAPI) {
 				extensions: resources.extensions,
 				prompts: resources.prompts,
 				themes: resources.themes,
-				unloadedSkills,
 			};
 			requestHudRender?.();
 			emitStateChanged();
