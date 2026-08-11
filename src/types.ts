@@ -20,14 +20,26 @@ export interface ResourceSettings {
 	disabledContexts: string[];
 }
 
-export type PresetThinkingLevel =
-	| "off"
-	| "minimal"
-	| "low"
-	| "medium"
-	| "high"
-	| "xhigh"
-	| "max";
+export const PRESET_THINKING_LEVELS = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+] as const;
+
+export type PresetThinkingLevel = (typeof PRESET_THINKING_LEVELS)[number];
+
+export function isPresetThinkingLevel(
+	value: unknown,
+): value is PresetThinkingLevel {
+	return (
+		typeof value === "string" &&
+		PRESET_THINKING_LEVELS.some((level) => level === value)
+	);
+}
 
 export interface PresetOriginalState {
 	provider?: string;
@@ -68,7 +80,6 @@ export interface SkillRecord {
 	path: string;
 	disableModelInvocation?: boolean;
 	sourceInfo?: SourceInfo;
-	loaded?: boolean;
 	nativeResource?: ResolvedResource;
 }
 
@@ -90,7 +101,6 @@ export interface RuntimeToolControl {
 
 export interface EffectiveSystemPrompt {
 	content: string;
-	capturedAt: number;
 	source: "command" | "agent-start";
 }
 

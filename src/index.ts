@@ -162,7 +162,6 @@ export default function piConfigManager(pi: ExtensionAPI) {
 			effectiveSystemPrompt: currentPrompt
 				? {
 						content: currentPrompt,
-						capturedAt: Date.now(),
 						source: "command",
 					}
 				: undefined,

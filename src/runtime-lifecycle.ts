@@ -110,7 +110,6 @@ export class RuntimeLifecycleController {
 			...this.host.getSnapshot(),
 			effectiveSystemPrompt: {
 				content: ctx.getSystemPrompt(),
-				capturedAt: Date.now(),
 				source: "agent-start",
 			},
 		});

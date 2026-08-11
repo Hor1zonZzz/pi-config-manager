@@ -38,7 +38,6 @@ export function buildPromptResourceInventory(
 			path: promptSkillPath(skill),
 			disableModelInvocation: skill.disableModelInvocation === true,
 			sourceInfo: skill.sourceInfo,
-			loaded: true,
 		}))
 		.sort((a, b) => a.name.localeCompare(b.name));
 	const contexts = (options.contextFiles ?? []).map((file) => ({
@@ -83,7 +82,6 @@ function loadDisabledSkill(
 		path: resource.path,
 		disableModelInvocation: loaded?.disableModelInvocation,
 		sourceInfo: resolvedSourceInfo(resource),
-		loaded: false,
 		nativeResource: resource,
 	};
 }
@@ -116,7 +114,6 @@ export function buildLoadedSkillInventory(
 			path: command.sourceInfo.path,
 			disableModelInvocation: existing.get(name)?.disableModelInvocation,
 			sourceInfo: command.sourceInfo,
-			loaded: true,
 		});
 	}
 	return skills.sort((a, b) => a.name.localeCompare(b.name));

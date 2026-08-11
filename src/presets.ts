@@ -4,7 +4,10 @@ import {
 	CONFIG_DIR_NAME,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import type { PresetThinkingLevel } from "./types";
+import {
+	isPresetThinkingLevel,
+	type PresetThinkingLevel,
+} from "./types";
 
 export interface Preset {
 	provider?: string;
@@ -19,16 +22,6 @@ export interface PresetsConfig {
 	[name: string]: Preset;
 }
 
-const THINKING_LEVELS = new Set<PresetThinkingLevel>([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
 function stringArray(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) return undefined;
 	return Array.from(
@@ -39,10 +32,8 @@ function stringArray(value: unknown): string[] | undefined {
 function normalizePreset(value: unknown): Preset | undefined {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const data = value as Record<string, unknown>;
-	const thinkingLevel = THINKING_LEVELS.has(
-		data.thinkingLevel as PresetThinkingLevel,
-	)
-		? (data.thinkingLevel as PresetThinkingLevel)
+	const thinkingLevel = isPresetThinkingLevel(data.thinkingLevel)
+		? data.thinkingLevel
 		: undefined;
 	const preset: Preset = {};
 	if (typeof data.provider === "string") preset.provider = data.provider;

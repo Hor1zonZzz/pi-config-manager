@@ -4,9 +4,9 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
 	DEFAULT_RESOURCE_SETTINGS,
 	DEFAULT_SESSION_STATE,
+	isPresetThinkingLevel,
 	type PresetOriginalState,
 	type PresetSessionState,
-	type PresetThinkingLevel,
 	type ResourceSettings,
 	type SessionResourceState,
 } from "./types";
@@ -38,28 +38,16 @@ export function normalizeResourceSettings(value: unknown): ResourceSettings {
 	};
 }
 
-const THINKING_LEVELS = new Set<PresetThinkingLevel>([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
 function normalizeOriginalState(value: unknown): PresetOriginalState | undefined {
 	if (!value || typeof value !== "object") return undefined;
 	const data = value as Record<string, unknown>;
-	if (
-		!THINKING_LEVELS.has(data.thinkingLevel as PresetThinkingLevel) ||
-		!Array.isArray(data.tools)
-	)
+	if (!isPresetThinkingLevel(data.thinkingLevel) || !Array.isArray(data.tools)) {
 		return undefined;
+	}
 	return {
 		provider: typeof data.provider === "string" ? data.provider : undefined,
 		model: typeof data.model === "string" ? data.model : undefined,
-		thinkingLevel: data.thinkingLevel as PresetThinkingLevel,
+		thinkingLevel: data.thinkingLevel,
 		tools: strings(data.tools),
 	};
 }
@@ -150,25 +138,5 @@ function writeAtomic(filePath: string, value: unknown): void {
 export function cloneSessionState(
 	state: SessionResourceState,
 ): SessionResourceState {
-	return {
-		...DEFAULT_SESSION_STATE,
-		...state,
-		tools: state.tools ? [...state.tools] : undefined,
-		enabledSkills: [...state.enabledSkills],
-		disabledSkills: [...state.disabledSkills],
-		enabledContexts: [...state.enabledContexts],
-		disabledContexts: [...state.disabledContexts],
-		preset: state.preset
-			? {
-					...state.preset,
-					appliedTools: state.preset.appliedTools
-						? [...state.preset.appliedTools]
-						: undefined,
-					originalState: {
-						...state.preset.originalState,
-						tools: [...state.preset.originalState.tools],
-					},
-				}
-			: undefined,
-	};
+	return structuredClone({ ...DEFAULT_SESSION_STATE, ...state });
 }

@@ -282,6 +282,25 @@ function previewSkill(skill: SkillRecord, sourceInfo: SourceInfo): Skill {
 	};
 }
 
+function skillPromptPreview(skill: SkillRecord, sourceInfo: SourceInfo) {
+	const content = formatSkillsForPrompt([previewSkill(skill, sourceInfo)]).trim();
+	const lines = content.split("\n");
+	const skillStart = lines.findIndex((line) => line.trim() === "<skill>");
+	const skillEnd = lines.findIndex(
+		(line, index) => index > skillStart && line.trim() === "</skill>",
+	);
+	return {
+		content,
+		highlightTarget: {
+			kind: "text-span" as const,
+			text:
+				skillStart >= 0 && skillEnd > skillStart
+					? lines.slice(skillStart + 1, skillEnd).join("\n")
+					: content,
+		},
+	};
+}
+
 function buildLoadedSkillItem(
 	snapshot: ManagerSnapshot,
 	skill: SkillRecord,
@@ -296,6 +315,7 @@ function buildLoadedSkillItem(
 		scope: "temporary",
 		origin: "top-level",
 	};
+	const preview = skillPromptPreview(skill, sourceInfo);
 	return {
 		id: skill.name,
 		label: skill.name,
@@ -313,13 +333,8 @@ function buildLoadedSkillItem(
 				status: presence.status,
 				statusColor: presence.catalogVisible ? "success" : "warning",
 				note: "This previews Pi's base prompt; later extension prompt rewrites can still differ.",
-				content: formatSkillsForPrompt([
-					previewSkill(skill, sourceInfo),
-				]).trim(),
-				highlightTarget: {
-					kind: "skill-fields",
-					skillName: skill.name,
-				},
+				content: preview.content,
+				highlightTarget: preview.highlightTarget,
 			},
 			{
 				showFullPrompt: true,
@@ -342,6 +357,10 @@ function buildUnloadedSkillItem(
 	const id = packageResourceId("skills", resource);
 	const staged = stagedPackageResources.get(id);
 	const enabled = staged?.enabled ?? false;
+	const preview = skillPromptPreview(
+		skill,
+		skill.sourceInfo ?? resolvedSourceInfo(resource),
+	);
 	let state = "not loaded by Pi settings · reload required";
 	if (staged) {
 		const action = enabled ? "enable" : "disable";
@@ -360,13 +379,8 @@ function buildUnloadedSkillItem(
 				channel: "system prompt skill catalog",
 				status: "not loaded by Pi settings",
 				statusColor: "dim",
-				content: formatSkillsForPrompt([
-					previewSkill(skill, skill.sourceInfo ?? resolvedSourceInfo(resource)),
-				]).trim(),
-				highlightTarget: {
-					kind: "skill-fields",
-					skillName: skill.name,
-				},
+				content: preview.content,
+				highlightTarget: preview.highlightTarget,
 				note: "Press Space to stage enabling this skill in Pi settings, then S to save and reload.",
 			},
 			{

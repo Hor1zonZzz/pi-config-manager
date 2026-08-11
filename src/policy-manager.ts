@@ -8,7 +8,6 @@ import type {
 } from "./types";
 
 export interface ProfilePolicy {
-	id: string;
 	tools?: string[];
 	skills?: string[];
 }
@@ -96,14 +95,9 @@ export class PolicyManager {
 			return;
 		}
 		this.profile = {
-			id: profile.id,
 			tools: profile.tools ? unique(profile.tools) : undefined,
 			skills: profile.skills ? unique(profile.skills) : undefined,
 		};
-	}
-
-	getProfileId(): string | undefined {
-		return this.profile?.id;
 	}
 
 	resolveBaseTools(): Set<string> {
@@ -145,19 +139,6 @@ export class PolicyManager {
 		return effective;
 	}
 
-	resolveGlobalDefaultTools(): Set<string> {
-		const disabled = new Set(this.globalSettings.disabledTools);
-		return new Set(
-			[
-				...this.defaultTools,
-				...this.globalSettings.enabledTools,
-				...this.externalTools,
-			].filter(
-				(name) => this.discoveredTools.has(name) && !disabled.has(name),
-			),
-		);
-	}
-
 	resolveEnabledSkills(skills: SkillRecord[]): Set<string> {
 		const disabled = new Set([
 			...this.globalSettings.disabledSkills,
@@ -177,13 +158,6 @@ export class PolicyManager {
 		return enabled;
 	}
 
-	resolveGlobalDefaultSkills(skills: SkillRecord[]): Set<string> {
-		const disabled = new Set(this.globalSettings.disabledSkills);
-		return new Set(
-			skills.map((skill) => skill.name).filter((name) => !disabled.has(name)),
-		);
-	}
-
 	resolveEnabledContexts(contexts: ContextRecord[]): Set<string> {
 		const disabled = new Set([
 			...this.globalSettings.disabledContexts,
@@ -199,15 +173,6 @@ export class PolicyManager {
 			if (contexts.some((context) => context.path === path)) enabled.add(path);
 		}
 		return enabled;
-	}
-
-	resolveGlobalDefaultContexts(contexts: ContextRecord[]): Set<string> {
-		const disabled = new Set(this.globalSettings.disabledContexts);
-		return new Set(
-			contexts
-				.map((context) => context.path)
-				.filter((path) => !disabled.has(path)),
-		);
 	}
 
 	setRuntimeLayer(layer: RuntimeLayer): boolean {

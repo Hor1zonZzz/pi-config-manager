@@ -62,7 +62,6 @@ describe("PolicyManager", () => {
 	test("applies profile, session, and runtime policy in deterministic layers", () => {
 		const policy = manager();
 		policy.setProfile({
-			id: "deep-code",
 			tools: ["read", "bash", "edit", "write"],
 		});
 		expect(Array.from(policy.resolveBaseTools()).sort()).toEqual([

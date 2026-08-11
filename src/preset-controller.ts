@@ -85,12 +85,8 @@ export class PresetController {
 		this.host.requestHudRender();
 	}
 
-	private setPolicy(
-		name: string,
-		preset: Preset,
-		tools: string[] | undefined,
-	): void {
-		this.policy.setProfile({ id: name, tools, skills: preset.skills });
+	private setPolicy(preset: Preset, tools: string[] | undefined): void {
+		this.policy.setProfile({ tools, skills: preset.skills });
 		const snapshot = this.host.getSnapshot();
 		this.host.setSnapshot({
 			...snapshot,
@@ -172,7 +168,7 @@ export class PresetController {
 		};
 		this.host.setSessionState(state);
 		this.policy.setSessionState(state);
-		this.setPolicy(name, preset, appliedTools);
+		this.setPolicy(preset, appliedTools);
 		this.host.reconcileTools();
 		this.host.persistSession();
 		this.updateStatus(ctx);
@@ -229,7 +225,7 @@ export class PresetController {
 			preset.tools?.filter((tool) =>
 				this.pi.getAllTools().some((candidate) => candidate.name === tool),
 			);
-		this.setPolicy(presetState.name, preset, tools);
+		this.setPolicy(preset, tools);
 		this.updateStatus(ctx);
 	}
 

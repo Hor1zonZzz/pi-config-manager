@@ -1,192 +1,69 @@
 export type PromptHighlightTarget =
 	| {
-			kind: "exact-lines";
-			lines: readonly string[];
-	  }
-	| {
 			kind: "contains-lines";
 			lines: readonly string[];
-	  }
-	| {
-			kind: "skill-fields";
-			skillName: string;
 	  }
 	| {
 			kind: "text-span";
 			text: string;
 	  };
 
-const SKILL_OPEN_TAG = "<skill>";
-const SKILL_CLOSE_TAG = "</skill>";
-const SKILL_FIELD_TAGS = ["name", "description", "location"] as const;
-
-type TagSpan = {
-	start: number;
-	end: number;
-	valueStart: number;
-	valueEnd: number;
-};
-
-function escapeXml(value: string): string {
-	return value
-		.replaceAll("&", "&amp;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll('"', "&quot;")
-		.replaceAll("'", "&apos;");
+function lineIndexAt(content: string, offset: number): number {
+	return content.slice(0, offset).split("\n").length - 1;
 }
 
-function findTagSpan(
-	content: string,
-	tag: string,
-	from = 0,
-): TagSpan | undefined {
-	const openTag = `<${tag}>`;
-	const closeTag = `</${tag}>`;
-	const start = content.indexOf(openTag, from);
-	if (start < 0) return undefined;
-	const valueStart = start + openTag.length;
-	const valueEnd = content.indexOf(closeTag, valueStart);
-	if (valueEnd < 0) return undefined;
-	return {
-		start,
-		end: valueEnd + closeTag.length,
-		valueStart,
-		valueEnd,
-	};
-}
-
-function lineStarts(content: string): number[] {
-	const starts = [0];
-	for (let index = 0; index < content.length; index += 1) {
-		if (content[index] === "\n") starts.push(index + 1);
-	}
-	return starts;
-}
-
-function lineIndexAt(starts: number[], offset: number): number {
-	let low = 0;
-	let high = starts.length;
-	while (low + 1 < high) {
-		const middle = Math.floor((low + high) / 2);
-		if ((starts[middle] ?? 0) <= offset) low = middle;
-		else high = middle;
-	}
-	return low;
-}
-
-function addSpanLineIndexes(
+function addTextSpanLineIndexes(
 	indexes: Set<number>,
-	starts: number[],
+	content: string,
 	spanStart: number,
 	spanEnd: number,
 ): void {
 	if (spanEnd <= spanStart) return;
-	const first = lineIndexAt(starts, spanStart);
-	const last = lineIndexAt(starts, spanEnd - 1);
+	const first = lineIndexAt(content, spanStart);
+	const last = lineIndexAt(content, spanEnd - 1);
 	for (let index = first; index <= last; index += 1) indexes.add(index);
-}
-
-function skillFieldLineIndexes(
-	content: string,
-	skillName: string,
-): Set<number> {
-	const targetName = escapeXml(skillName);
-	const starts = lineStarts(content);
-	for (let cursor = 0; cursor < content.length; ) {
-		const skillStart = content.indexOf(SKILL_OPEN_TAG, cursor);
-		if (skillStart < 0) break;
-		const skillContentStart = skillStart + SKILL_OPEN_TAG.length;
-		const skillCloseStart = content.indexOf(SKILL_CLOSE_TAG, skillContentStart);
-		if (skillCloseStart < 0) break;
-		const skillEnd = skillCloseStart + SKILL_CLOSE_TAG.length;
-		const block = content.slice(skillContentStart, skillCloseStart);
-		const nameSpan = findTagSpan(block, "name");
-
-		if (
-			nameSpan &&
-			block.slice(nameSpan.valueStart, nameSpan.valueEnd).trim() === targetName
-		) {
-			const highlighted = new Set<number>();
-			for (const tag of SKILL_FIELD_TAGS) {
-				const fieldSpan = findTagSpan(block, tag);
-				if (!fieldSpan) continue;
-				addSpanLineIndexes(
-					highlighted,
-					starts,
-					skillContentStart + fieldSpan.start,
-					skillContentStart + fieldSpan.end,
-				);
-			}
-			return highlighted;
-		}
-
-		cursor = skillEnd;
-	}
-
-	return new Set<number>();
 }
 
 export function getHighlightedLineIndexes(
 	content: string,
 	target: PromptHighlightTarget,
 ): Set<number> {
-	if (target.kind === "skill-fields") {
-		return skillFieldLineIndexes(content, target.skillName);
-	}
-
-	if (target.kind === "text-span") {
-		const highlighted = new Set<number>();
-		if (target.text.length === 0) return highlighted;
-		const starts = lineStarts(content);
-		for (let cursor = 0; cursor < content.length; ) {
-			const start = content.indexOf(target.text, cursor);
-			if (start < 0) break;
-			addSpanLineIndexes(
-				highlighted,
-				starts,
-				start,
-				start + target.text.length,
-			);
-			cursor = start + target.text.length;
-		}
-		return highlighted;
-	}
-
-	if (target.kind === "exact-lines") {
-		const exactLines = new Set(target.lines.map((line) => line.trim()));
+	if (target.kind === "contains-lines") {
 		return new Set(
 			content
 				.split("\n")
-				.flatMap((line, index) => (exactLines.has(line.trim()) ? [index] : [])),
+				.flatMap((line, index) =>
+					target.lines.some((marker) => line.includes(marker)) ? [index] : [],
+				),
 		);
 	}
 
-	return new Set(
-		content
-			.split("\n")
-			.flatMap((line, index) =>
-				target.lines.some((highlight) => line.includes(highlight))
-					? [index]
-					: [],
-			),
-	);
+	const highlighted = new Set<number>();
+	if (target.text.length === 0) return highlighted;
+	for (let cursor = 0; cursor < content.length; ) {
+		const start = content.indexOf(target.text, cursor);
+		if (start < 0) break;
+		addTextSpanLineIndexes(
+			highlighted,
+			content,
+			start,
+			start + target.text.length,
+		);
+		cursor = start + target.text.length;
+	}
+	return highlighted;
 }
 
 export function promptContainsTarget(
 	content: string,
 	target: PromptHighlightTarget,
 ): boolean {
-	if (target.kind === "skill-fields" || target.kind === "text-span") {
-		return getHighlightedLineIndexes(content, target).size > 0;
+	if (target.kind === "text-span") {
+		return target.text.length > 0 && content.includes(target.text);
 	}
 	if (target.lines.length === 0) return true;
 	const lines = content.split("\n");
-	return target.lines.every((highlight) =>
-		lines.some((line) =>
-			target.kind === "exact-lines"
-				? line.trim() === highlight.trim()
-				: line.includes(highlight),
-		),
+	return target.lines.every((marker) =>
+		lines.some((line) => line.includes(marker)),
 	);
 }
